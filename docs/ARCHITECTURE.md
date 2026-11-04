@@ -343,6 +343,26 @@ chat como inicio; el modo LLM decide qué campos se montan.
 estable para reutilizar el core. Coste: más módulos y un `Page` con estado de
 navegación.
 
+### ADR-007 — Diálogos nativos por el prompt de GPUI, nunca `rfd`
+
+**Contexto:** `rfd::FileDialog::pick_file()` bloquea el hilo que lo invoca y en
+Windows ejecuta su propio bucle modal de mensajes. Ese bucle despacha mensajes
+al procedimiento de ventana de GPUI mientras el `&mut App` del manejador de clic
+sigue prestado: GPUI aborta con `RefCell already borrowed`
+(`gpui/src/window.rs:2242`) y el proceso termina con
+`STATUS_STACK_BUFFER_OVERRUN` (`0xc0000409`). En Linux no se reproducía porque
+el backend de `rfd` (GTK o portal) bloquea en otro hilo.
+**Decisión:** todos los selectores usan `App::prompt_for_paths` a través de
+`crates/ui/src/dialog.rs`. GPUI delega el diálogo a la plataforma (hilo dedicado
+en Windows, `xdg-desktop-portal` en Linux) y entrega el resultado por un canal
+asíncrono; el callback corre cuando el clic ya retornó y sin préstamos vivos.
+`rfd` no es dependencia del proyecto.
+**Consecuencia:** el mismo código funciona en Linux, Windows y macOS sin
+reentrancia. Se pierden título propio, carpeta inicial y filtros por extensión
+(la API de GPUI no los expone); a cambio el diálogo es el nativo de cada sistema
+y en Linux requiere `xdg-desktop-portal` instalado, igual que cualquier app GTK
+moderna.
+
 ## 10. Seguridad y privacidad
 
 - Todo el audio y los prompts se quedan en `localhost`.
@@ -408,7 +428,10 @@ Multiplataforma:
   `/proc` en el camino principal.
 - VRAM: sysfs AMD en Linux y `nvidia-smi` si existe; AMD en Windows queda como
   `n/d` hasta integrar DXGI/ADL.
-- `rfd` abre los selectores nativos en las tres plataformas.
+- `crates/ui/src/dialog.rs` abre los selectores con `prompt_for_paths` de GPUI
+  (ver ADR-007): el diálogo nativo corre en el hilo de la plataforma y el
+  resultado llega por un canal asíncrono. Nunca `rfd` ni ningún diálogo modal
+  bloqueante dentro de un callback de la UI.
 - `resolve_binary` respeta `PATHEXT` en Windows; los hijos usan `kill_on_drop`.
 - Prohibido `unsafe`: el proyecto no enlaza APIs de driver.
 

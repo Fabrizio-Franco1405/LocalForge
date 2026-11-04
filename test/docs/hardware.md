@@ -131,6 +131,26 @@ watch -n0.5 'free -h'                # sin swap durante la carga
 - [ ] `kill -9` al padre: en Linux el hijo muere; en Windows documentar la
   limitación (Job Object pendiente).
 
+## 10. Diálogos nativos (Linux, Windows, macOS)
+
+Regresión del cierre en Windows: `rfd::FileDialog` abría un diálogo modal
+bloqueante dentro del callback de GPUI, reentraba en el `&mut App` prestado y
+mataba el proceso con `RefCell already borrowed` / `0xc0000409`. Ahora todo
+selector pasa por `ui::dialog` → `prompt_for_paths`. Probar en las tres
+plataformas:
+
+- [ ] Ajustes → Motor LLM → «Elegir archivo…» (binario `llama-server`) abre el
+      explorador nativo y la app sigue viva.
+- [ ] Ajustes → Motor LLM → «Elegir carpeta…» y Cancelar no cambia la ruta.
+- [ ] Ajustes → Motor Audio → modelo ggml, script de Kokoro y carpeta del modelo.
+- [ ] Chat → «Adjuntar» permite multiselección; los adjuntos aparecen como chips.
+- [ ] Estudio 3D → «Elegir binario», «Modelos» y «Elegir imagen».
+- [ ] Abrir el mismo selector dos veces seguidas: sin pánico ni diálogos
+      huérfanos.
+- [ ] El diálogo queda modal a la ventana y por delante de ella.
+- [ ] Linux sin `xdg-desktop-portal`: aparece un `warn` en el log y la app
+      sigue usable (no hay pánico).
+
 ## Registro de resultados
 
 Anota por ejecución: fecha, versión de Mesa, modelo, `-ngl`, contexto, tok/s,

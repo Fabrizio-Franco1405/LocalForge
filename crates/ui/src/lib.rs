@@ -6,6 +6,7 @@
 pub mod app;
 pub mod chat;
 pub mod config;
+pub mod dialog;
 pub mod settings;
 pub mod theme;
 

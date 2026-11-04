@@ -30,6 +30,7 @@ El workspace tiene un binario mínimo (`src/main.rs`) y crates con responsabilid
   - `app/footer.rs` — estado del LLM, CPU/RAM/VRAM, micrófono y altavoz.
   - `settings/mod.rs` + `settings/{fields,llm,audio,scene3d,general}.rs` — una página por motor.
   - `settings/llm.rs` decide los campos según `LlmMode`: Local muestra binario/GGUF/host; Externo muestra endpoint/model id/API key. Nunca ambos.
+  - `dialog.rs` — únicos selectores de archivos: `prompt_for_paths` de GPUI con callback asíncrono (`Pick::File/Files/Folder`, `pick_paths`, `pick_paths_for`).
 
 **Regla de oro:** La UI (`crates/ui`) no debe saber cómo se lanza `llama-server`. Solo envía `EngineCommand` y pinta `EngineEvent`. La lógica de negocio no depende de GPUI.
 
@@ -39,7 +40,9 @@ El workspace tiene un binario mínimo (`src/main.rs`) y crates con responsabilid
 
 **Regla de rendimiento:** nada pesado en el hilo de GPUI ni en el callback de audio. Escaneos, STT y TTS van a `spawn_blocking`/hilos; la captura usa un canal acotado y el callback solo convierte y reenvía. Para medir, usa `--release`.
 
-**Regla multiplataforma:** nada de `/proc` obligatorio, rutas POSIX asumidas ni `unsafe`. Usa `sysinfo`, `PathBuf`, `shared::tools::resolve_binary` (PATHEXT) y `rfd`. Linux, Windows 11 y macOS deben compilar y funcionar.
+**Regla multiplataforma:** nada de `/proc` obligatorio, rutas POSIX asumidas ni `unsafe`. Usa `sysinfo`, `PathBuf`, `shared::tools::resolve_binary` (PATHEXT) y los selectores nativos de GPUI (`cx.prompt_for_paths` vía `ui::dialog`). Linux, Windows 11 y macOS deben compilar y funcionar.
+
+**Regla de diálogos nativos:** prohibido `rfd` y cualquier diálogo modal bloqueante dentro de un callback de la UI. `rfd::FileDialog::pick_file()` corre un bucle modal propio que en Windows reentra en la ventana de GPUI mientras el `App` está prestado y mata el proceso con `RefCell already borrowed` / `0xc0000409`. Usa `crate::dialog::pick_paths`/`pick_paths_for`; `test/tests/ui.rs` falla si `rfd` reaparece en el código o en el manifiesto.
 
 Nota de estado: `llm_engine`, `shared`, `ui`, `controller`, `stt`, `tts` y `audio_engine` están implementados; solo `scene3d` sigue como placeholder. No añadas funcionalidad simulada: implementa el crate o deja el stub honesto.
 
@@ -106,7 +109,7 @@ Nota de estado: `llm_engine`, `shared`, `ui`, `controller`, `stt`, `tts` y `audi
   `test/tests/`.
 - Para probar lógica privada, expón una API pública pequeña y documentada (ej.
   `shared::text::truncate_chars`, `ui::theme::parse_hex`), no dejes el test dentro del crate.
-- Comando: `cd test && cargo test` (62 tests; sin GPU, micrófono, modelos ni red externa).
+- Comando: `cd test && cargo test` (64 tests; sin GPU, micrófono, modelos ni red externa).
 - Lo que requiera hardware, modelos o latencia real va a `test/docs/hardware.md` como
   checklist manual, no como test automatizado.
 

@@ -12,6 +12,9 @@ use gpui_kit::*;
 use shared::{LlmMode, TtsBackend, VoxConfig};
 
 use crate::config;
+use crate::dialog::pick_paths;
+
+pub(super) use crate::dialog::Pick;
 
 pub(super) const LLM_MODES: [(&str, &str); 2] = [
     ("Gestionado por LocalForge", "managed"),
@@ -82,18 +85,10 @@ where
     )
 }
 
-/// What the native dialog should pick.
-#[derive(Clone, Copy)]
-pub(super) enum Pick {
-    /// Any existing file.
-    File,
-    /// A file filtered by extension.
-    Typed(&'static str, &'static [&'static str]),
-    /// A directory.
-    Folder,
-}
-
-/// Native explorer button shown under a path input.
+/// Botón de selector nativo que se muestra bajo un campo de ruta.
+///
+/// El diálogo lo abre [`pick_paths`] en el hilo de la plataforma: nunca se llama
+/// a `rfd` desde aquí (ver `crate::dialog` para el fallo de Windows).
 pub(super) fn path_picker<G, S>(label: &'static str, pick: Pick, get: G, set: S) -> SettingItem
 where
     G: Fn(&VoxConfig) -> Option<std::path::PathBuf> + 'static,
@@ -109,31 +104,14 @@ where
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "Sin seleccionar".to_owned());
 
-        let get_pick = std::rc::Rc::clone(&get);
         let set_pick = std::rc::Rc::clone(&set);
         let picker = move |_event: &gpui_kit::ClickEvent, _window: &mut Window, cx: &mut App| {
-            let mut dialog = rfd::FileDialog::new();
-
-            if let Some(path) = get_pick(&config::current(cx)) {
-                let directory = if path.is_dir() {
-                    Some(path.clone())
-                } else {
-                    path.parent().map(std::path::Path::to_path_buf)
-                };
-                if let Some(directory) = directory {
-                    dialog = dialog.set_directory(directory);
+            let set_pick = std::rc::Rc::clone(&set_pick);
+            pick_paths(cx, pick.options(), move |cx, paths| {
+                if let Some(path) = paths.into_iter().next() {
+                    config::update(cx, |cfg| set_pick(cfg, Some(path)));
                 }
-            }
-
-            let picked = match pick {
-                Pick::Folder => dialog.pick_folder(),
-                Pick::File => dialog.pick_file(),
-                Pick::Typed(name, extensions) => dialog.add_filter(name, extensions).pick_file(),
-            };
-
-            if let Some(path) = picked {
-                config::update(cx, |cfg| set_pick(cfg, Some(path)));
-            }
+            });
         };
 
         div()
@@ -143,10 +121,7 @@ where
             .child(
                 Button::new(format!("pick-{label}"))
                     .small()
-                    .label(match pick {
-                        Pick::Folder => "Elegir carpeta…",
-                        Pick::File | Pick::Typed(..) => "Elegir archivo…",
-                    })
+                    .label(pick.button_label())
                     .on_click(picker),
             )
             .child(

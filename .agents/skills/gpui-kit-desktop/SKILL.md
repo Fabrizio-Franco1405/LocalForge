@@ -118,6 +118,43 @@ impl VoxApp {
 - For cross-thread work use channels (LocalForge's `EngineHandle`) and poll with a
   timer; this avoids mixing tokio's reactor with GPUI's executor.
 
+## File dialogs (never block the UI thread)
+
+Use GPUI's platform prompt; never `rfd` and never a blocking modal dialog inside
+a click handler. LocalForge routes every picker through
+`ui::dialog::{Pick, pick_paths, pick_paths_for}`.
+
+```rust
+// crates/ui/src/dialog.rs wraps this for the whole app.
+let receiver = cx.prompt_for_paths(PathPromptOptions {
+    files: true,
+    directories: false,
+    multiple: true,
+    prompt: None,
+});
+
+cx.spawn(async move |cx| {
+    if let Ok(Ok(Some(paths))) = receiver.await {
+        cx.update(|cx| { /* mutate globals or entities here */ });
+    }
+})
+.detach();
+```
+
+- `rfd::FileDialog::pick_file()` blocks and runs its own modal message loop. On
+  Windows that loop re-enters the GPUI window procedure while the click handler
+  still holds `&mut App`; GPUI panics with `RefCell already borrowed`
+  (`gpui/src/window.rs:2242`) and the process dies with `0xc0000409`. Linux
+  hides the bug because `rfd` blocks on another thread.
+- `prompt_for_paths` runs the native dialog on a platform thread (dedicated
+  thread on Windows, `xdg-desktop-portal` on Linux) and returns a oneshot
+  receiver; the callback runs after the click handler returned, with no borrow
+  active.
+- GPUI's prompt has no title, initial directory or extension filter. Do not
+  reintroduce them by going back to `rfd`.
+- Linux needs `xdg-desktop-portal`; a missing portal arrives as `Err` on the
+  receiver, not a panic. Log it and keep the app usable.
+
 ## Settings component (config UI)
 
 Import:
@@ -222,6 +259,7 @@ GPUI Kit 0.9 has a `speech` feature with `SpeechState`, `SpeechButton`,
 | `Subscription` not stored | callbacks stop firing |
 | `Task` not stored | async work is cancelled immediately |
 | Blocking in render/callback | UI freezes; use a channel + pump |
+| `rfd`/blocking modal dialog in a click handler | Windows aborts with `RefCell already borrowed`; use `cx.prompt_for_paths` (see *File dialogs*) |
 | Setting a global without notify | views observing the global do not repaint |
 | Using old `StreamTrait::play` (cpal) | unrelated but same era: use `.start()` |
 | Direct `gpui` dependency | version mismatch; use `gpui_kit::*` |

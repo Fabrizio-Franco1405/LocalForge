@@ -12,9 +12,9 @@ test/
 │   ├── lib.rs            # helpers compartidos por la suite
 │   └── mock_server.rs    # servidor OpenAI falso para el controlador
 ├── tests/
-│   ├── shared.rs         # config, eventos, texto, tools        (24 tests)
-│   ├── llm_engine.rs     # args, SSE, health, modo externo      (11 tests)
-│   ├── ui.rs             # ChatLog, workspaces, colores         (8 tests)
+│   ├── shared.rs         # config, eventos, texto, tools        (23 tests)
+│   ├── llm_engine.rs     # args, SSE, health, modo externo      (12 tests)
+│   ├── ui.rs             # ChatLog, workspaces, colores, diálogos (12 tests)
 │   ├── controller.rs     # controlador real + servidor falso      (2 tests)
 │   ├── system.rs         # sampler, VRAM, escaneo y GPU           (9 tests)
 │   ├── audio.rs          # remuestreo, parser STT y WAV TTS        (4 tests)
@@ -32,7 +32,7 @@ Desde `test/` (importante: así cargo lee `.cargo/config.toml` y comparte el
 
 ```bash
 cd test
-cargo test                    # 62 tests, sin GPU, sin micrófono, sin modelos
+cargo test                    # 64 tests, sin GPU, sin micrófono, sin modelos
 cargo test --test shared      # solo un archivo
 cargo test truncate           # filtra por nombre
 cargo test -- --nocapture     # muestra stdout
@@ -47,7 +47,7 @@ cargo test --manifest-path test/Cargo.toml
 ## Requisitos
 
 - Rust 1.92+ (edición 2024).
-- Nada más para los 62 tests actuales: ni Vulkan, ni `llama-server`, ni
+- Nada más para los 64 tests actuales: ni Vulkan, ni `llama-server`, ni
   `whisper-cli`, ni micrófono.
 - La primera compilación tarda porque construye `ui`/GPUI Kit; después usa la
   caché de `../target`.
@@ -58,12 +58,12 @@ cargo test --manifest-path test/Cargo.toml
 | --- | --- | --- |
 | `shared.rs` | Defaults, TOML parcial, round-trip, `expand_path`, `resolve_binary`, `for_speech`, `truncate_chars`, canal de eventos | Config rota, TTS leyendo Markdown, eventos perdidos |
 | `llm_engine.rs` | `build_args`, `extra_args`, parser SSE (cola parcial, comentarios, `[DONE]`), health `Down`, URLs externas con/sin `/v1` | Arrancar llama-server con flags incorrectos, romper el streaming |
-| `ui.rs` | `ChatLog` (deltas, cancelación, burbuja vacía), etiquetas de página, `parse_hex` | Burbujas duplicadas, texto perdido al cancelar, tema ilegible |
+| `ui.rs` | `ChatLog` (deltas, cancelación, burbuja vacía), etiquetas de página, `parse_hex`, opciones de los selectores nativos y ausencia de `rfd` | Burbujas duplicadas, texto perdido al cancelar, tema ilegible, cierre de la app al abrir un archivo en Windows |
 | `controller.rs` | Detección de servidor externo sin modelo, chat completo vía SSE, `model` reportado por `/v1/models` | Controlador que no arranca sin GGUF o que ignora el modelo del servidor |
 | `system.rs` | Sampler `sysinfo`, parser de `nvidia-smi`, dispositivos Vulkan y `llama-server --list-devices` | Monitor de recursos o hardware que miente |
 | `boundary.rs` | Los crates core no dependen ni importan GPUI | Que el "core" se acople a la UI y no se pueda portar |
 
-Total: **62 tests**. Todos puros o con loopback; ninguno abre red externa.
+Total: **64 tests**. Todos puros o con loopback; ninguno abre red externa.
 
 ## Convenciones
 

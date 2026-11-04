@@ -167,6 +167,9 @@ otherwise document public items with `///` and keep `//` for *why*.
 - ❌ Spawning a new `llama-server` per message.
 - ❌ Adding a `tokio::runtime::Runtime` per request.
 - ❌ `unwrap()` on model paths or health checks.
+- ❌ Opening a file dialog with `rfd` (or any blocking modal) from a GPUI
+  callback: it re-enters the app and aborts on Windows. Use
+  `ui::dialog::pick_paths{,_for}`, which awaits GPUI's `prompt_for_paths`.
 
 ## Verification checklist
 

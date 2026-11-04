@@ -15,9 +15,9 @@ Si necesita un dispositivo o un modelo, es manual.
 
 | Crate | Estado | Tests | Pendiente |
 | --- | --- | --- | --- |
-| `shared` | Implementado | 24 | Reload de config desde entorno (`LOCALFORGE_*`), `save` atómico |
-| `llm_engine` | Implementado | 11 | Parseo de `usage`/tokens, timeout de stream, reinicio tras crash |
-| `ui` | Implementado | 7 | Estados de la barra, notificaciones, settings (requieren ventana) |
+| `shared` | Implementado | 23 | Reload de config desde entorno (`LOCALFORGE_*`), `save` atómico |
+| `llm_engine` | Implementado | 12 | Parseo de `usage`/tokens, timeout de stream, reinicio tras crash |
+| `ui` | Implementado | 12 | Estados de la barra, notificaciones, settings (requieren ventana) |
 | `localforge` (controlador) | Implementado | 2 | Cancelación de generación, `ReloadConfig`, diagnóstico de tools |
 | `stt` | Implementado | 3 | WAV PCM16, parser de stdout, códigos de error |
 | `tts` | Implementado | 1 | Sanitizador, plantilla de comando, WAV 24 kHz |
@@ -67,3 +67,7 @@ Si necesita un dispositivo o un modelo, es manual.
 4. **Zombis** de `llama-server`/`whisper-cli` (manual: `pgrep`).
 5. **TTS leyendo Markdown** (cubierto en `shared`).
 6. **Barge-in que se dispara con el propio TTS** (manual, sin AEC real).
+7. **Selector de archivos que cierra la app en Windows**: un diálogo modal
+   bloqueante reentra en GPUI sobre el `&mut App` prestado (`RefCell already
+   borrowed`, `0xc0000409`). Cubierto en `tests/ui.rs`: opciones del prompt
+   nativo y prohibición de `rfd` en el código y el manifiesto de `ui`.

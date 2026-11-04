@@ -13,6 +13,7 @@ use shared::{EngineCommand, LlmState, TtsBackend};
 use crate::app::{SettingsTab, VoxApp, WorkspaceMode};
 use crate::chat::render_bubble;
 use crate::config;
+use crate::dialog::{Pick, pick_paths_for};
 
 impl VoxApp {
     fn empty_state(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -550,11 +551,11 @@ impl VoxApp {
                             .ghost()
                             .icon(IconName::Paperclip)
                             .label("Adjuntar")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if let Some(paths) = rfd::FileDialog::new().pick_files() {
+                            .on_click(cx.listener(|_, _, _, cx| {
+                                pick_paths_for(cx, Pick::Files.options(), |this, cx, paths| {
                                     this.attachments.extend(paths);
                                     cx.notify();
-                                }
+                                });
                             })),
                     )
                     .child(

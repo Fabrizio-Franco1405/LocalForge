@@ -8,7 +8,6 @@ license.workspace = true
 gpui-kit = { workspace = true }
 shared = { workspace = true }
 tracing = { workspace = true }
-rfd = { workspace = true }
 
 [lints]
 workspace = true

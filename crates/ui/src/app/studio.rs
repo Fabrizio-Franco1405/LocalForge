@@ -10,6 +10,7 @@ use gpui_kit::*;
 
 use crate::app::{SettingsTab, VoxApp, WorkspaceMode};
 use crate::config;
+use crate::dialog::{Pick, pick_paths_for};
 
 impl VoxApp {
     pub(super) fn studio_page(&mut self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -66,13 +67,14 @@ impl VoxApp {
                                     .ghost()
                                     .icon(IconName::FolderOpen)
                                     .label("Elegir binario")
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        if let Some(path) = rfd::FileDialog::new().pick_file() {
-                                            config::update(cx, |cfg| {
-                                                cfg.scene3d.trellis_binary = path;
-                                            });
-                                            let _ = this;
-                                        }
+                                    .on_click(cx.listener(|_, _, _, cx| {
+                                        pick_paths_for(cx, Pick::File.options(), |_, cx, paths| {
+                                            if let Some(path) = paths.into_iter().next() {
+                                                config::update(cx, |cfg| {
+                                                    cfg.scene3d.trellis_binary = path;
+                                                });
+                                            }
+                                        });
                                     })),
                             )
                             .child(
@@ -81,13 +83,14 @@ impl VoxApp {
                                     .ghost()
                                     .icon(IconName::HardDrive)
                                     .label("Modelos")
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                                            config::update(cx, |cfg| {
-                                                cfg.scene3d.model_dir = Some(path);
-                                            });
-                                            let _ = this;
-                                        }
+                                    .on_click(cx.listener(|_, _, _, cx| {
+                                        pick_paths_for(cx, Pick::Folder.options(), |_, cx, paths| {
+                                            if let Some(path) = paths.into_iter().next() {
+                                                config::update(cx, |cfg| {
+                                                    cfg.scene3d.model_dir = Some(path);
+                                                });
+                                            }
+                                        });
                                     })),
                             ),
                     )
@@ -120,14 +123,13 @@ impl VoxApp {
                             .ghost()
                             .icon(IconName::Image)
                             .label("Elegir imagen")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if let Some(path) = rfd::FileDialog::new()
-                                    .add_filter("Imagen", &["png", "jpg", "jpeg", "webp"])
-                                    .pick_file()
-                                {
-                                    this.studio_image = Some(path);
-                                    cx.notify();
-                                }
+                            .on_click(cx.listener(|_, _, _, cx| {
+                                pick_paths_for(cx, Pick::File.options(), |this, cx, paths| {
+                                    if let Some(path) = paths.into_iter().next() {
+                                        this.studio_image = Some(path);
+                                        cx.notify();
+                                    }
+                                });
                             })),
                     )
                     .child(div().flex_1())

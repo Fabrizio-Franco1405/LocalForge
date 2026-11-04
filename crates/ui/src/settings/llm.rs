@@ -87,7 +87,7 @@ fn connection_group(mode: LlmMode) -> SettingGroup {
             )
             .item(path_picker(
                 "Modelo GGUF",
-                Pick::Typed("Modelo GGUF", &["gguf"]),
+                Pick::File,
                 |cfg| cfg.llm.model.clone(),
                 |cfg, value| cfg.llm.model = value,
             )),

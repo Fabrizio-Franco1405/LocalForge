@@ -165,7 +165,7 @@ La suite vive en `test/`, es un crate propio **fuera del workspace** y está
 ignorada por git: el repositorio solo versiona el código de la app.
 
 ```bash
-cd test && cargo test        # 62 tests: shared, llm_engine, system, audio, ui, controller, boundary
+cd test && cargo test        # 64 tests: shared, llm_engine, system, audio, ui, controller, boundary
 ```
 
 No necesita GPU, micrófono ni modelos. El detalle (cobertura, fixtures y

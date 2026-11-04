@@ -61,7 +61,7 @@ pub fn page(devices: &crate::config::AudioDevices) -> SettingPage {
                     )
                     .item(path_picker(
                         "Modelo ggml",
-                        Pick::Typed("Modelo Whisper", &["bin"]),
+                        Pick::File,
                         |cfg| cfg.stt.model.clone(),
                         |cfg, value| cfg.stt.model = value,
                     ))
@@ -172,7 +172,7 @@ pub fn page(devices: &crate::config::AudioDevices) -> SettingPage {
                     ))
                     .item(path_picker(
                         "Script Kokoro",
-                        Pick::Typed("Script Python", &["py"]),
+                        Pick::File,
                         |cfg| Some(cfg.tts.worker_script.clone()),
                         |cfg, value| {
                             if let Some(path) = value {
