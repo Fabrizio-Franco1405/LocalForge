@@ -72,6 +72,8 @@ pub enum EngineCommand {
     SetListening(bool),
     /// Ask the controller to validate the connected tools and paths.
     ProbeTools,
+    /// Re-probe the LLM endpoint and refresh its live status.
+    ProbeLlm,
     /// Stop all processes and end the controller loop.
     Shutdown,
 }
@@ -168,10 +170,7 @@ impl EngineHandle {
 
     /// Blocks until an event arrives or the timeout expires. For tests and
     /// tools, never for the UI thread.
-    pub fn recv_timeout(
-        &self,
-        timeout: std::time::Duration,
-    ) -> Option<EngineEvent> {
+    pub fn recv_timeout(&self, timeout: std::time::Duration) -> Option<EngineEvent> {
         self.events.recv_timeout(timeout).ok()
     }
 }

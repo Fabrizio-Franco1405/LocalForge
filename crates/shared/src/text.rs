@@ -62,14 +62,14 @@ fn strip_links(input: &str) -> String {
 
     while index < input.len() {
         let rest = &input[index..];
-        if rest.starts_with('[') {
-            if let Some(text_end_rel) = rest.find("](") {
-                let text_end = index + text_end_rel;
-                if let Some(paren_rel) = input[text_end + 2..].find(')') {
-                    out.push_str(&input[index + 1..text_end]);
-                    index = text_end + 2 + paren_rel + 1;
-                    continue;
-                }
+        if rest.starts_with('[')
+            && let Some(text_end_rel) = rest.find("](")
+        {
+            let text_end = index + text_end_rel;
+            if let Some(paren_rel) = input[text_end + 2..].find(')') {
+                out.push_str(&input[index + 1..text_end]);
+                index = text_end + 2 + paren_rel + 1;
+                continue;
             }
         }
 
@@ -98,10 +98,10 @@ fn strip_leading_marker(line: &str) -> &str {
     }
 
     let digits: String = trimmed.chars().take_while(char::is_ascii_digit).collect();
-    if !digits.is_empty() {
-        if let Some(rest) = trimmed[digits.len()..].strip_prefix(". ") {
-            return rest;
-        }
+    if !digits.is_empty()
+        && let Some(rest) = trimmed[digits.len()..].strip_prefix(". ")
+    {
+        return rest;
     }
 
     trimmed.trim_start_matches('#').trim_start()

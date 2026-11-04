@@ -9,14 +9,16 @@ use std::time::Duration;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, Sizable as _, StyledExt as _, WindowExt as _};
+use gpui_kit::component::{
+    ActiveTheme as _, Disableable as _, Sizable as _, StyledExt as _, WindowExt as _,
+};
 use gpui_kit::prelude::{FluentBuilder as _, StatefulInteractiveElement as _};
 use gpui_kit::*;
 use shared::{
     DiagnosticItem, EngineCommand, EngineEvent, EngineHandle, LlmMode, LlmState, TtsBackend,
 };
 
-use crate::chat::{render_bubble, ChatLog};
+use crate::chat::{ChatLog, render_bubble};
 use crate::config;
 use crate::settings;
 
@@ -66,9 +68,8 @@ pub struct VoxApp {
 impl VoxApp {
     /// Builds the view and starts the event pump.
     pub fn new(window: &mut Window, cx: &mut Context<Self>, engine: EngineHandle) -> Self {
-        let draft = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Escribe un mensaje y pulsa Enter…")
-        });
+        let draft = cx
+            .new(|cx| InputState::new(window, cx).placeholder("Escribe un mensaje y pulsa Enter…"));
 
         let _draft_sub = cx.subscribe_in(&draft, window, |this, state, event, window, cx| {
             if matches!(event, InputEvent::PressEnter { shift: false, .. }) {
@@ -77,7 +78,11 @@ impl VoxApp {
             }
         });
 
-        let _config_sub = cx.observe_global::<config::GlobalConfig>(|_, cx| cx.notify());
+        let _config_sub = cx.observe_global::<config::GlobalConfig>(|_, cx| {
+            let ui = config::current(cx).ui;
+            crate::theme::apply(cx, &ui, None);
+            cx.notify();
+        });
 
         let _pump = cx.spawn(async move |this, cx| {
             loop {
@@ -91,7 +96,7 @@ impl VoxApp {
         });
 
         let mut app = Self {
-            page: Page::Settings,
+            page: Page::Chat,
             engine,
             log: ChatLog::new(),
             draft,
@@ -159,7 +164,10 @@ impl VoxApp {
                     false
                 }
             }
-            EngineEvent::Transcript { generation: _, text } => {
+            EngineEvent::Transcript {
+                generation: _,
+                text,
+            } => {
                 let text = text.trim().to_owned();
                 if text.is_empty() {
                     return false;
@@ -248,10 +256,15 @@ impl VoxApp {
         cx.notify();
     }
 
+    fn probe_connection(&mut self, cx: &mut Context<Self>) {
+        self.engine.send(EngineCommand::ProbeLlm);
+        self.engine.send(EngineCommand::ProbeTools);
+        cx.notify();
+    }
+
     fn apply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let cfg = config::current(cx);
-        self.engine
-            .send(EngineCommand::ReloadConfig(Box::new(cfg)));
+        self.engine.send(EngineCommand::ReloadConfig(Box::new(cfg)));
         cx.global_mut::<config::GlobalConfig>().mark_applied();
 
         if let Some(error) = cx.global::<config::GlobalConfig>().save_error.clone() {
@@ -287,16 +300,12 @@ impl VoxApp {
         if !self.listening {
             self.level = 0.0;
         }
-        self.engine.send(EngineCommand::SetListening(self.listening));
+        self.engine
+            .send(EngineCommand::SetListening(self.listening));
         cx.notify();
     }
 
-    fn nav(
-        &self,
-        id: &'static str,
-        page: Page,
-        cx: &mut Context<Self>,
-    ) -> Button {
+    fn nav(&self, id: &'static str, page: Page, cx: &mut Context<Self>) -> Button {
         let button = Button::new(id).small().label(page.label());
         let button = if self.page == page {
             button.primary()
@@ -355,6 +364,15 @@ impl VoxApp {
                     .flex()
                     .items_center()
                     .gap_2()
+                    .child(
+                        Button::new("probe-llm")
+                            .small()
+                            .ghost()
+                            .label("Comprobar")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.probe_connection(cx);
+                            })),
+                    )
                     .child(self.status_pill(cx))
                     .child(
                         Button::new("apply")
@@ -449,6 +467,15 @@ impl VoxApp {
                     .items_center()
                     .gap_2()
                     .child(
+                        Button::new("probe-header")
+                            .small()
+                            .ghost()
+                            .label("Comprobar conexión")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.probe_connection(cx);
+                            })),
+                    )
+                    .child(
                         Button::new("restart")
                             .small()
                             .ghost()
@@ -467,78 +494,186 @@ impl VoxApp {
             )
     }
 
-    fn empty_state(&self, cx: &App) -> impl IntoElement {
+    fn empty_state(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
+        let cfg = config::current(cx);
+
+        let (llm_color, llm_value) = match self.llm {
+            LlmState::Ready => (theme.success, "conectado"),
+            LlmState::Starting => (theme.warning, "cargando"),
+            LlmState::Error => (theme.danger, "error"),
+            LlmState::Stopped => (theme.muted_foreground, "detenido"),
+        };
+
+        let stt_value = if cfg.stt.enabled {
+            "activado"
+        } else {
+            "opcional"
+        };
+        let stt_color = if cfg.stt.enabled {
+            theme.success
+        } else {
+            theme.muted_foreground
+        };
+
+        let tts_value = match cfg.tts.backend {
+            TtsBackend::Disabled => "opcional",
+            _ => "conectado",
+        };
+        let tts_color = if cfg.tts.backend == TtsBackend::Disabled {
+            theme.muted_foreground
+        } else {
+            theme.success
+        };
 
         div()
             .flex()
             .flex_col()
             .items_center()
-            .gap_6()
-            .py_16()
+            .gap_5()
+            .px_6()
+            .py_10()
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .items_center()
-                    .gap_2()
+                    .gap_5()
+                    .max_w(px(820.))
+                    .w_full()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(theme.primary.opacity(0.28))
+                    .bg(theme.group_box)
+                    .p_8()
                     .child(
                         div()
-                            .text_lg()
-                            .font_semibold()
-                            .text_color(theme.foreground)
-                            .child("Conecta tus herramientas y habla"),
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_full()
+                                    .bg(theme.primary.opacity(0.14))
+                                    .text_xs()
+                                    .font_semibold()
+                                    .text_color(theme.primary)
+                                    .child("100% LOCAL · BYO TOOLS"),
+                            )
+                            .child(
+                                div()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_full()
+                                    .bg(theme.muted)
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child("Vulkan · sin CUDA / ROCm"),
+                            ),
                     )
                     .child(
                         div()
-                            .text_sm()
-                            .text_color(theme.muted_foreground)
+                            .flex()
+                            .flex_col()
+                            .gap_2()
                             .child(
-                                "VoxLocal no descarga ni instala nada: solo orquesta lo que tú conectas.",
+                                div()
+                                    .text_2xl()
+                                    .font_semibold()
+                                    .text_color(theme.foreground)
+                                    .child("Tu voz, tus modelos, tu máquina."),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(theme.muted_foreground)
+                                    .child(
+                                        "VoxLocal no descarga ni instala nada: conecta tu llama.cpp, \
+                                         tu whisper.cpp y tu TTS, y conversa sin salir del equipo.",
+                                    ),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap_2()
+                            .child(status_chip("LLM", llm_value, llm_color, cx))
+                            .child(status_chip("STT", stt_value, stt_color, cx))
+                            .child(status_chip("TTS", tts_value, tts_color, cx))
+                            .child(status_chip("Backend", "Vulkan", theme.success, cx)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                Button::new("hero-settings")
+                                    .primary()
+                                    .label("Configurar motor")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.page = Page::Settings;
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                Button::new("hero-probe")
+                                    .ghost()
+                                    .label("Comprobar conexión")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.probe_connection(cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new("hero-tools")
+                                    .ghost()
+                                    .label("Ver herramientas")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.page = Page::Tools;
+                                        this.probe(cx);
+                                    })),
                             ),
                     ),
             )
             .child(
                 div()
                     .flex()
-                    .flex_col()
+                    .flex_wrap()
                     .gap_3()
-                    .max_w(px(620.))
+                    .max_w(px(820.))
                     .w_full()
-                    .child(step(
+                    .child(feature_card(
                         "1",
-                        "Conecta un modelo",
-                        "En Ajustes → Motor LLM, apunta tu llama-server (o un endpoint OpenAI externo) a un .gguf local.",
+                        "Conecta",
+                        "Apunta VoxLocal a tu llama-server o a cualquier endpoint compatible con OpenAI. También detecta un servidor que ya esté corriendo.",
                         cx,
                     ))
-                    .child(step(
+                    .child(feature_card(
                         "2",
-                        "Comprueba las rutas",
-                        "Abre Herramientas y verifica qué binarios y modelos ve VoxLocal. Lo que falte se muestra, no se instala.",
+                        "Comprueba",
+                        "Aplicar y Reiniciar vuelven a leer la configuración y a probar el puerto. Herramientas muestra qué rutas ve y qué falta.",
                         cx,
                     ))
-                    .child(step(
+                    .child(feature_card(
                         "3",
-                        "Aplica los cambios",
-                        "El botón Aplicar reinicia solo los procesos gestionados. Nada se lanza al escribir una ruta.",
-                        cx,
-                    ))
-                    .child(step(
-                        "4",
-                        "Escribe o dicta",
-                        "Sin STT ni TTS también funciona: el chat es el centro del hub.",
+                        "Conversa",
+                        "El chat funciona sin STT ni TTS. Cuando conectes Whisper y tu motor de voz, el mismo flujo se vuelve manos libres.",
                         cx,
                     )),
             )
     }
 
     fn message_list(&self, cx: &App) -> impl IntoElement {
-        div()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .p_4()
-            .children(self.log.bubbles().iter().map(|bubble| render_bubble(bubble, cx)))
+        div().flex().flex_col().gap_3().p_4().children(
+            self.log
+                .bubbles()
+                .iter()
+                .map(|bubble| render_bubble(bubble, cx)),
+        )
     }
 
     fn composer(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -561,15 +696,12 @@ impl VoxApp {
                     .gap_2()
                     .child(div().flex_1().child(Input::new(&self.draft)))
                     .when(self.streaming.is_none(), |this| {
-                        this.child(
-                            Button::new("send")
-                                .primary()
-                                .label("Enviar")
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    let text = this.draft.read(cx).value().to_string();
-                                    this.submit(&text, window, cx);
-                                })),
-                        )
+                        this.child(Button::new("send").primary().label("Enviar").on_click(
+                            cx.listener(|this, _, window, cx| {
+                                let text = this.draft.read(cx).value().to_string();
+                                this.submit(&text, window, cx);
+                            }),
+                        ))
                     })
                     .when(self.streaming.is_some(), |this| {
                         this.child(
@@ -612,7 +744,12 @@ impl VoxApp {
                                 .flex()
                                 .items_center()
                                 .gap_2()
-                                .child(div().text_xs().text_color(theme.muted_foreground).child("Nivel"))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(theme.muted_foreground)
+                                        .child("Nivel"),
+                                )
                                 .child(
                                     div()
                                         .w(px(120. * self.level.clamp(0.0, 1.0)))
@@ -623,17 +760,12 @@ impl VoxApp {
                         )
                     })
                     .when_some(self.notice.clone(), |this, notice| {
-                        this.child(
-                            div()
-                                .text_xs()
-                                .text_color(theme.danger)
-                                .child(notice),
-                        )
+                        this.child(div().text_xs().text_color(theme.danger).child(notice))
                     }),
             )
     }
 
-    fn chat_page(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn chat_page(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
             .flex_col()
@@ -646,9 +778,7 @@ impl VoxApp {
                     .min_h(px(0.))
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
-                    .when(self.log.is_empty(), |this| {
-                        this.child(self.empty_state(cx))
-                    })
+                    .when(self.log.is_empty(), |this| this.child(self.empty_state(cx)))
                     .when(!self.log.is_empty(), |this| {
                         this.child(self.message_list(cx))
                     }),
@@ -838,65 +968,98 @@ impl Render for VoxApp {
             .bg(theme.background)
             .text_color(theme.foreground)
             .child(self.top_bar(cx))
-            .child(
-                div()
-                    .flex_1()
-                    .min_h(px(0.))
-                    .child(match self.page {
-                        Page::Chat => self.chat_page(cx).into_any_element(),
-                        Page::Settings => settings::view(cx).into_any_element(),
-                        Page::Tools => self.tools_page(cx).into_any_element(),
-                    }),
-            )
+            .child(div().flex_1().min_h(px(0.)).child(match self.page {
+                Page::Chat => self.chat_page(cx).into_any_element(),
+                Page::Settings => settings::view(cx).into_any_element(),
+                Page::Tools => self.tools_page(cx).into_any_element(),
+            }))
             .child(self.status_bar(cx))
     }
 }
 
-fn step(number: &'static str, title: &'static str, body: &'static str, cx: &App) -> impl IntoElement {
+fn status_chip(
+    label: &'static str,
+    value: &'static str,
+    color: Hsla,
+    cx: &App,
+) -> impl IntoElement {
     let theme = cx.theme();
 
     div()
         .flex()
-        .items_start()
-        .gap_3()
+        .items_center()
+        .gap_2()
+        .px_2()
+        .py_1()
+        .rounded_full()
+        .bg(color.opacity(0.12))
+        .child(div().w(px(6.)).h(px(6.)).rounded_full().bg(color))
+        .child(
+            div()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(format!("{label}:")),
+        )
+        .child(
+            div()
+                .text_xs()
+                .font_semibold()
+                .text_color(theme.foreground)
+                .child(value),
+        )
+}
+
+fn feature_card(
+    number: &'static str,
+    title: &'static str,
+    body: &'static str,
+    cx: &App,
+) -> impl IntoElement {
+    let theme = cx.theme();
+
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .flex_1()
+        .min_w(px(210.))
         .rounded_md()
         .border_1()
         .border_color(theme.border)
         .bg(theme.group_box)
-        .p_3()
+        .p_4()
         .child(
             div()
                 .flex()
                 .items_center()
-                .justify_center()
-                .w(px(24.))
-                .h(px(24.))
-                .rounded_full()
-                .bg(theme.primary)
-                .text_color(theme.primary_foreground)
-                .text_xs()
-                .font_semibold()
-                .child(number),
-        )
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap_1()
-                .flex_1()
+                .gap_2()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .w(px(22.))
+                        .h(px(22.))
+                        .rounded_full()
+                        .bg(theme.primary)
+                        .text_color(theme.primary_foreground)
+                        .text_xs()
+                        .font_semibold()
+                        .child(number),
+                )
                 .child(
                     div()
                         .text_sm()
                         .font_semibold()
                         .text_color(theme.foreground)
                         .child(title),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(body),
                 ),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(body),
         )
 }
 
@@ -972,7 +1135,7 @@ fn info_card(title: &'static str, body: &str, cx: &App) -> impl IntoElement {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::Page;
 
     #[test]
     fn page_labels_are_stable() {

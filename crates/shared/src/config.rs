@@ -15,7 +15,7 @@ use figment::providers::Format as _;
 use serde::{Deserialize, Serialize};
 
 /// Root configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VoxConfig {
     /// Text generation engine (llama.cpp).
@@ -32,19 +32,6 @@ pub struct VoxConfig {
     pub paths: PathsConfig,
 }
 
-impl Default for VoxConfig {
-    fn default() -> Self {
-        Self {
-            llm: LlmConfig::default(),
-            stt: SttConfig::default(),
-            tts: TtsConfig::default(),
-            audio: AudioConfig::default(),
-            ui: UiConfig::default(),
-            paths: PathsConfig::default(),
-        }
-    }
-}
-
 impl VoxConfig {
     /// Loads the configuration from `path`.
     ///
@@ -58,7 +45,7 @@ impl VoxConfig {
             .merge(figment::providers::Toml::file(path))
             .merge(figment::providers::Env::prefixed("VOXLOCAL_").split("__"))
             .extract()
-            .map_err(ConfigError::Invalid)
+            .map_err(|error| ConfigError::Invalid(Box::new(error)))
     }
 
     /// Saves the configuration as pretty TOML, creating parent directories.
@@ -70,8 +57,8 @@ impl VoxConfig {
             })?;
         }
 
-        let rendered =
-            toml::to_string_pretty(self).map_err(|error| ConfigError::Serialize(error.to_string()))?;
+        let rendered = toml::to_string_pretty(self)
+            .map_err(|error| ConfigError::Serialize(error.to_string()))?;
 
         std::fs::write(path, rendered).map_err(|source| ConfigError::Io {
             path: path.to_path_buf(),
@@ -106,20 +93,15 @@ impl VoxConfig {
 }
 
 /// How the chat endpoint is provided.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LlmMode {
     /// VoxLocal spawns and supervises `llama-server`.
+    #[default]
     Managed,
     /// The user provides an OpenAI-compatible server (Ollama, LM Studio,
     /// llama-server already running, a remote gateway...).
     External,
-}
-
-impl Default for LlmMode {
-    fn default() -> Self {
-        Self::Managed
-    }
 }
 
 /// llama.cpp / OpenAI-compatible server configuration.
@@ -133,7 +115,12 @@ pub struct LlmConfig {
     /// Absolute path to a `.gguf` model (managed mode).
     pub model: Option<PathBuf>,
     /// Base URL for external mode, for example `http://127.0.0.1:11434/v1`.
+    ///
+    /// `127.0.0.1:9931` is accepted too; the scheme is added automatically.
     pub endpoint: String,
+    /// Optional model id sent to external servers. When empty, the first id
+    /// reported by `/v1/models` is used.
+    pub model_id: String,
     /// Optional bearer token for external gateways. Stored in plain text.
     pub api_key: String,
     /// Bind address for the local server.
@@ -167,6 +154,7 @@ impl Default for LlmConfig {
             binary: PathBuf::from("llama-server"),
             model: None,
             endpoint: String::new(),
+            model_id: String::new(),
             api_key: String::new(),
             host: "127.0.0.1".to_owned(),
             port: 9931,
@@ -199,11 +187,28 @@ impl LlmConfig {
     }
 
     /// HTTP base for the selected mode.
+    ///
+    /// External endpoints may be written as `127.0.0.1:9931`; the missing
+    /// scheme is added so the user can paste exactly what the server prints.
     pub fn http_base(&self) -> String {
         if self.mode == LlmMode::External && !self.endpoint.trim().is_empty() {
-            self.endpoint.trim().trim_end_matches('/').to_owned()
+            let raw = self.endpoint.trim().trim_end_matches('/');
+            if raw.starts_with("http://") || raw.starts_with("https://") {
+                raw.to_owned()
+            } else {
+                format!("http://{raw}")
+            }
         } else {
             self.base_url()
+        }
+    }
+
+    /// Endpoint exactly as the user wrote it, normalized for display.
+    pub fn normalized_endpoint(&self) -> String {
+        if self.endpoint.trim().is_empty() {
+            String::new()
+        } else {
+            self.http_base()
         }
     }
 
@@ -267,22 +272,17 @@ impl Default for SttConfig {
 }
 
 /// Text-to-speech backend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TtsBackend {
     /// The user has not connected a TTS tool yet.
+    #[default]
     Disabled,
     /// Bundled helper script using `kokoro-onnx` (ONNX Runtime CPU). The user
     /// provides the interpreter, script and model files.
     KokoroCli,
     /// Any command that writes a WAV file; text is sent on stdin.
     Command,
-}
-
-impl Default for TtsBackend {
-    fn default() -> Self {
-        Self::Disabled
-    }
 }
 
 /// Kokoro / external TTS configuration.
@@ -388,8 +388,16 @@ impl Default for VadConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
-    /// `dark`, `light` or `system` (applied on next start in v0.1).
+    /// `dark`, `light` or `system`.
     pub theme: String,
+    /// Accent preset: `violet`, `blue`, `emerald`, `amber`, `rose` or `custom`.
+    pub accent: String,
+    /// Hex color (`#rrggbb`) used when `accent = "custom"`.
+    pub accent_custom: String,
+    /// Corner radius in pixels (`0..=20`).
+    pub radius: f32,
+    /// Base font size in pixels (`12..=20`).
+    pub font_size: f32,
     /// Show the debug/status panel.
     pub show_debug: bool,
 }
@@ -398,7 +406,32 @@ impl Default for UiConfig {
     fn default() -> Self {
         Self {
             theme: "dark".to_owned(),
+            accent: "violet".to_owned(),
+            accent_custom: "#7c5cff".to_owned(),
+            radius: 8.0,
+            font_size: 14.0,
             show_debug: false,
+        }
+    }
+}
+
+impl UiConfig {
+    /// Effective accent color as `#rrggbb`.
+    pub fn accent_hex(&self) -> String {
+        match self.accent.as_str() {
+            "blue" => "#3b82f6".to_owned(),
+            "emerald" => "#10b981".to_owned(),
+            "amber" => "#f59e0b".to_owned(),
+            "rose" => "#f43f5e".to_owned(),
+            "custom" => {
+                let custom = self.accent_custom.trim();
+                if custom.starts_with('#') && (custom.len() == 7 || custom.len() == 4) {
+                    custom.to_owned()
+                } else {
+                    "#7c5cff".to_owned()
+                }
+            }
+            _ => "#7c5cff".to_owned(),
         }
     }
 }
@@ -426,7 +459,7 @@ pub enum ConfigError {
     },
     /// The TOML or environment values are not valid for the schema.
     #[error("configuración inválida: {0}")]
-    Invalid(figment::Error),
+    Invalid(Box<figment::Error>),
     /// Serialization to TOML failed.
     #[error("no se pudo serializar la configuración: {0}")]
     Serialize(String),
@@ -434,6 +467,8 @@ pub enum ConfigError {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::field_reassign_with_default)]
+
     use super::*;
 
     #[test]

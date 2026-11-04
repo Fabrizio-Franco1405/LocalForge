@@ -6,7 +6,6 @@
 
 mod controller;
 
-use gpui_kit::component::theme::{Theme, ThemeMode};
 use gpui_kit::*;
 use shared::VoxConfig;
 use tracing_subscriber::EnvFilter;
@@ -34,23 +33,21 @@ fn main() {
     };
 
     let engine = controller::spawn(config.clone());
-    let theme_mode = match config.ui.theme.as_str() {
-        "light" => ThemeMode::Light,
-        _ => ThemeMode::Dark,
-    };
 
     application().with_assets(assets::Assets).run(move |cx| {
         init(cx);
-        Theme::change(theme_mode, None, cx);
         config::init(cx, config.clone(), config_path.clone());
+        ui::theme::apply(cx, &config.ui, None);
 
-        let mut options = WindowOptions::default();
-        options.titlebar = Some(TitlebarOptions {
-            title: Some("VoxLocal".into()),
+        let options = WindowOptions {
+            titlebar: Some(TitlebarOptions {
+                title: Some("VoxLocal".into()),
+                ..Default::default()
+            }),
+            window_bounds: Some(WindowBounds::centered(size(px(1120.), px(760.)), cx)),
+            window_min_size: Some(size(px(880.), px(560.))),
             ..Default::default()
-        });
-        options.window_bounds = Some(WindowBounds::centered(size(px(1120.), px(760.)), cx));
-        options.window_min_size = Some(size(px(880.), px(560.)));
+        };
 
         let engine = engine.clone();
         let opened = open_window(options, cx, move |window, cx| {

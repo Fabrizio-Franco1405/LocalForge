@@ -7,6 +7,7 @@ pub mod app;
 pub mod chat;
 pub mod config;
 pub mod settings;
+pub mod theme;
 
 pub use app::{Page, VoxApp};
 pub use config::{GlobalConfig, init};

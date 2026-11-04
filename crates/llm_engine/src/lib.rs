@@ -105,6 +105,28 @@ pub enum LlmHealth {
     Ready,
 }
 
+/// Detailed status of an OpenAI-compatible server.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServerProbe {
+    /// An endpoint answered successfully.
+    pub ready: bool,
+    /// The host answered, but the model is still loading or the route failed.
+    pub reachable: bool,
+    /// URL that answered (or the last one tried).
+    pub url: String,
+    /// Human readable status.
+    pub detail: String,
+    /// Model ids reported by `/v1/models`.
+    pub models: Vec<String>,
+}
+
+impl ServerProbe {
+    /// First model id reported by the server, if any.
+    pub fn first_model(&self) -> Option<String> {
+        self.models.first().cloned()
+    }
+}
+
 /// Errors returned by [`LlamaManager`].
 #[derive(Debug, thiserror::Error)]
 pub enum LlmError {
@@ -312,22 +334,130 @@ impl LlamaManager {
     /// OpenAI-compatible `/v1/models` because third-party servers may not
     /// implement `/health`.
     pub async fn health(&self) -> LlmHealth {
-        let url = if self.config.is_managed() {
-            format!("{}/health", self.config.base_url())
+        let probe = self.probe().await;
+        if probe.ready {
+            LlmHealth::Ready
+        } else if probe.reachable {
+            LlmHealth::Loading
         } else {
-            self.config.models_url()
+            LlmHealth::Down
+        }
+    }
+
+    /// Full status probe used by the controller and the tools page.
+    ///
+    /// It asks both `/health` (llama.cpp) and `/v1/models` (any
+    /// OpenAI-compatible server), so a server started outside VoxLocal is
+    /// detected even when the app has no model configured.
+    pub async fn probe(&self) -> ServerProbe {
+        let base = self.config.http_base();
+        let origin = strip_v1(&base);
+        let mut probe = ServerProbe {
+            url: base.clone(),
+            ..ServerProbe::default()
         };
 
+        let mut health_urls = vec![format!("{}/health", origin.trim_end_matches('/'))];
+        if origin != base {
+            health_urls.insert(0, format!("{}/health", base.trim_end_matches('/')));
+        }
+
+        for url in health_urls {
+            match self.get_json(&url).await {
+                Ok((status, body)) if status.is_success() => {
+                    probe.ready = true;
+                    probe.reachable = true;
+                    probe.detail = format!("Servidor listo · {origin}");
+                    probe.models = parse_models(&body);
+                    break;
+                }
+                Ok((status, _)) if status.as_u16() == 503 => {
+                    probe.reachable = true;
+                    probe.detail =
+                        format!("El servidor responde pero el modelo sigue cargando ({origin})");
+                }
+                Ok((status, _)) => {
+                    probe.reachable = true;
+                    if probe.detail.is_empty() {
+                        probe.detail = format!("El servidor responde HTTP {status} en {origin}");
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+
+        // `/v1/models` also gives us the model id needed by strict
+        // OpenAI-compatible servers.
+        let models_url = self.config.models_url();
+        if let Ok((status, body)) = self.get_json(&models_url).await {
+            if status.is_success() {
+                probe.reachable = true;
+                let models = parse_models(&body);
+                if probe.models.is_empty() {
+                    probe.models = models;
+                }
+                if !probe.ready {
+                    probe.ready = true;
+                    probe.detail = if probe.models.is_empty() {
+                        format!("Servidor OpenAI listo · {base}")
+                    } else {
+                        format!(
+                            "Servidor OpenAI listo · {} modelo(s) · {base}",
+                            probe.models.len()
+                        )
+                    };
+                }
+            } else if status.as_u16() == 503 {
+                probe.reachable = true;
+                if probe.detail.is_empty() {
+                    probe.detail = "El modelo sigue cargando".to_owned();
+                }
+            } else if probe.detail.is_empty() {
+                probe.reachable = true;
+                probe.detail = format!("El servidor responde HTTP {status} en {base}");
+            }
+        }
+
+        if probe.detail.is_empty() {
+            probe.detail = format!("Sin respuesta en {base} (¿está iniciado llama-server?)");
+        }
+
+        probe
+    }
+
+    async fn get_json(&self, url: &str) -> Result<(reqwest::StatusCode, String), reqwest::Error> {
         let mut request = self.client.get(url).timeout(Duration::from_secs(2));
         if !self.config.api_key.is_empty() {
             request = request.bearer_auth(&self.config.api_key);
         }
 
-        match request.send().await {
-            Ok(response) if response.status().is_success() => LlmHealth::Ready,
-            Ok(response) if response.status().as_u16() == 503 => LlmHealth::Loading,
-            Ok(_) => LlmHealth::Down,
-            Err(_) => LlmHealth::Down,
+        let response = request.send().await?;
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        Ok((status, body))
+    }
+
+    /// Checks whether a managed child exited. Returns its exit code and the
+    /// last log lines, and clears the child so it can be restarted.
+    pub fn poll_exit(&mut self) -> Option<(Option<i32>, String)> {
+        let status = self.child.as_mut()?.try_wait().ok().flatten()?;
+
+        self.child = None;
+        self.started_at = None;
+        Some((status.code(), self.last_logs_joined(20)))
+    }
+
+    /// Returns the model id to send in chat requests.
+    ///
+    /// `llama-server` ignores it, but vLLM, LM Studio and gateways validate
+    /// it. The configured `model_id` wins; otherwise the caller may inject the
+    /// first id reported by `/v1/models`.
+    pub fn effective_model_id(&self) -> String {
+        let configured = self.config.model_id.trim();
+        if !configured.is_empty() {
+            configured.to_owned()
+        } else {
+            "local".to_owned()
         }
     }
 
@@ -339,7 +469,7 @@ impl LlamaManager {
         max_tokens: u32,
     ) -> Result<mpsc::Receiver<ChatDelta>, LlmError> {
         let body = serde_json::json!({
-            "model": "local",
+            "model": self.effective_model_id(),
             "messages": messages,
             "stream": true,
             "temperature": temperature,
@@ -465,6 +595,40 @@ impl Drop for LlamaManager {
     }
 }
 
+/// Removes a trailing `/v1` so `/health` can be tried at the origin.
+fn strip_v1(base: &str) -> String {
+    base.trim_end_matches('/')
+        .strip_suffix("/v1")
+        .unwrap_or(base.trim_end_matches('/'))
+        .to_owned()
+}
+
+/// Extracts model ids from an OpenAI `/v1/models` response.
+fn parse_models(body: &str) -> Vec<String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return Vec::new();
+    };
+
+    let list = value
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .or_else(|| value.get("models").and_then(serde_json::Value::as_array));
+
+    list.map(|entries| {
+        entries
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .get("id")
+                    .or_else(|| entry.get("name"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            })
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
 fn spawn_log_reader<R>(reader: R, logs: Arc<Mutex<VecDeque<String>>>, stream: &'static str)
 where
     R: AsyncRead + Unpin + Send + 'static,
@@ -588,8 +752,7 @@ mod tests {
 
     #[test]
     fn sse_payloads_split_and_keep_partial_tail() {
-        let mut buffer =
-            "data: {\"a\":1}\n\ndata: {\"b\":2}\n\ndata: {\"partial\"".to_owned();
+        let mut buffer = "data: {\"a\":1}\n\ndata: {\"b\":2}\n\ndata: {\"partial\"".to_owned();
         let payloads = take_sse_payloads(&mut buffer);
 
         assert_eq!(payloads, vec!["{\"a\":1}", "{\"b\":2}"]);

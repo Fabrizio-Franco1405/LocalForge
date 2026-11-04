@@ -4,16 +4,19 @@
 //! [`EngineCommand`] / [`EngineEvent`] values. The controller runs on a
 //! dedicated OS thread with its own tokio runtime, so GPUI's executor never
 //! blocks on process startup or model loading.
+//!
+//! The LLM state is never assumed: every change comes from an HTTP probe, so
+//! a `llama-server` started outside VoxLocal is detected and used directly.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
-use llm_engine::{ChatDelta, ChatMessage, LlamaManager};
+use llm_engine::{ChatDelta, ChatMessage, LlamaManager, ServerProbe};
 use shared::{
-    engine_channel, DiagnosticItem, EngineCommand, EngineEvent, EngineHandle, LlmState, LlmMode,
-    TtsBackend, VoxConfig,
+    DiagnosticItem, EngineCommand, EngineEvent, EngineHandle, LlmMode, LlmState, TtsBackend,
+    VoxConfig, engine_channel,
 };
 use tokio::sync::mpsc;
 
@@ -29,6 +32,12 @@ struct Controller {
     internal_tx: mpsc::UnboundedSender<Internal>,
     internal_rx: mpsc::UnboundedReceiver<Internal>,
     llm: Option<LlamaManager>,
+    /// Last successful probe and its human-readable detail.
+    probe: ServerProbe,
+    state: LlmState,
+    detail: String,
+    /// Model id reported by `/v1/models`, used by strict OpenAI servers.
+    resolved_model: String,
     history: Vec<ChatMessage>,
     streaming: Option<u64>,
     active: Arc<AtomicU64>,
@@ -50,7 +59,9 @@ pub fn spawn(config: VoxConfig) -> EngineHandle {
                 Ok(runtime) => {
                     runtime.block_on(Controller::new(config, commands, events).run());
                 }
-                Err(error) => tracing::error!(%error, "no se pudo crear el runtime del controlador"),
+                Err(error) => {
+                    tracing::error!(%error, "no se pudo crear el runtime del controlador")
+                }
             }
         })
         .ok();
@@ -73,6 +84,10 @@ impl Controller {
             internal_tx,
             internal_rx,
             llm: None,
+            probe: ServerProbe::default(),
+            state: LlmState::Stopped,
+            detail: "Sin iniciar".to_owned(),
+            resolved_model: String::new(),
             history: Vec::new(),
             streaming: None,
             active: Arc::new(AtomicU64::new(0)),
@@ -80,14 +95,14 @@ impl Controller {
     }
 
     async fn run(mut self) {
-        self.emit(EngineEvent::Llm {
-            state: LlmState::Stopped,
-            detail: "Sin iniciar".to_owned(),
-        });
+        self.set_state(LlmState::Stopped, "Buscando servidor…".to_owned());
 
-        if self.config.llm.auto_start {
-            self.start_llm().await;
-        }
+        // Always probe first: a server started by the user must be detected
+        // even when no GGUF model is configured in VoxLocal.
+        self.refresh(self.config.llm.auto_start).await;
+
+        let mut ticker = tokio::time::interval(Duration::from_secs(3));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
             tokio::select! {
@@ -103,6 +118,9 @@ impl Controller {
                 }
                 Some(internal) = self.internal_rx.recv() => {
                     self.handle_internal(internal);
+                }
+                _ = ticker.tick() => {
+                    self.tick().await;
                 }
             }
         }
@@ -123,130 +141,310 @@ impl Controller {
         });
     }
 
-    async fn start_llm(&mut self) {
-        if let Some(mut old) = self.llm.take() {
-            old.stop().await;
+    /// Emits a lifecycle event only when something actually changed.
+    fn set_state(&mut self, state: LlmState, detail: String) {
+        if self.state == state && self.detail == detail {
+            return;
+        }
+        self.state = state;
+        self.detail = detail.clone();
+        self.emit(EngineEvent::Llm { state, detail });
+    }
+
+    fn ensure_manager(&mut self) -> bool {
+        if self.llm.is_some() {
+            return true;
+        }
+
+        let timeout = Duration::from_secs(self.config.llm.startup_timeout_secs.max(5));
+        match LlamaManager::new(self.config.llm.clone(), timeout) {
+            Ok(manager) => {
+                self.llm = Some(manager);
+                true
+            }
+            Err(error) => {
+                self.emit_error("llm", error.to_string());
+                self.set_state(LlmState::Error, error.to_string());
+                false
+            }
+        }
+    }
+
+    /// Applies the current config to the manager, keeping the resolved model id.
+    fn sync_manager_config(&mut self) {
+        if let Some(manager) = self.llm.as_mut() {
+            let mut config = self.config.llm.clone();
+            if config.model_id.trim().is_empty() {
+                config.model_id = self.resolved_model.clone();
+            }
+            manager.set_config(config);
+        }
+    }
+
+    fn adopt_models(&mut self, probe: &ServerProbe) {
+        if !self.resolved_model.is_empty() {
+            return;
+        }
+
+        let configured = self.config.llm.model_id.trim();
+        if !configured.is_empty() {
+            self.resolved_model = configured.to_owned();
+            return;
+        }
+
+        if let Some(model) = probe.first_model() {
+            self.resolved_model = model;
+            self.sync_manager_config();
+        }
+    }
+
+    /// Re-probes the configured endpoint and updates the lifecycle state.
+    ///
+    /// `force_start` controls whether a managed `llama-server` is spawned when
+    /// nothing is listening. Booting honours `auto_start`; Apply and Restart
+    /// force it so the buttons never look inert.
+    async fn refresh(&mut self, force_start: bool) {
+        if !self.ensure_manager() {
+            return;
+        }
+        self.sync_manager_config();
+
+        let probe = match self.llm.as_ref() {
+            Some(manager) => manager.probe().await,
+            None => return,
+        };
+        self.adopt_models(&probe);
+        self.probe = probe.clone();
+
+        if probe.ready {
+            self.set_state(LlmState::Ready, probe.detail);
+            return;
         }
 
         if !self.config.llm.is_managed() {
-            let endpoint = self.config.llm.chat_completions_url();
-            if self.config.llm.endpoint.trim().is_empty() {
-                self.emit(EngineEvent::Llm {
-                    state: LlmState::Error,
-                    detail: "Falta el endpoint externo (Ajustes → Motor LLM)".to_owned(),
-                });
+            self.external_state(&probe);
+            return;
+        }
+
+        if !force_start && !self.llm.as_ref().is_some_and(LlamaManager::is_running) {
+            let hint = if self.config.llm.model.is_some() {
+                format!("{} · pulsa Aplicar o Reiniciar para arrancar", probe.detail)
             } else {
-                self.emit(EngineEvent::Llm {
-                    state: LlmState::Ready,
-                    detail: endpoint,
-                });
-            }
+                format!(
+                    "{} · configura un .gguf o inicia llama-server con --port {}",
+                    probe.detail, self.config.llm.port
+                )
+            };
+            self.set_state(LlmState::Stopped, hint);
             return;
         }
 
         if self.config.llm.model.is_none() {
-            self.emit(EngineEvent::Llm {
-                state: LlmState::Stopped,
-                detail: "Conecta un modelo GGUF en Ajustes → Motor LLM".to_owned(),
-            });
+            self.set_state(
+                LlmState::Stopped,
+                format!(
+                    "Conecta un modelo GGUF o inicia llama-server en el puerto {}",
+                    self.config.llm.port
+                ),
+            );
             return;
         }
 
-        let timeout = Duration::from_secs(self.config.llm.startup_timeout_secs.max(5));
-        let mut manager = match LlamaManager::new(self.config.llm.clone(), timeout) {
-            Ok(manager) => manager,
-            Err(error) => {
-                self.emit_error("llm", error.to_string());
-                return;
-            }
-        };
-
-        let detail = self
+        let model_name = self
             .config
             .llm
             .model
             .as_ref()
             .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "sin modelo configurado".to_owned());
+            .unwrap_or_else(|| "modelo".to_owned());
 
-        self.emit(EngineEvent::Llm {
-            state: LlmState::Starting,
-            detail,
-        });
-
-        if let Err(error) = manager.start().await {
-            self.emit_error("llm", error.to_string());
-            self.llm = Some(manager);
-            return;
+        if !self.llm.as_ref().is_some_and(LlamaManager::is_running) {
+            self.set_state(
+                LlmState::Starting,
+                format!("Lanzando llama-server · {model_name}"),
+            );
+            let start = match self.llm.as_mut() {
+                Some(manager) => manager.start().await,
+                None => return,
+            };
+            if let Err(error) = start {
+                // The port may be taken by a server that just came up; probe
+                // once more before declaring failure.
+                if let Some(manager) = self.llm.as_ref() {
+                    let probe = manager.probe().await;
+                    if probe.ready {
+                        self.probe = probe.clone();
+                        self.set_state(LlmState::Ready, probe.detail);
+                        return;
+                    }
+                }
+                self.emit_error("llm", error.to_string());
+                self.set_state(LlmState::Error, error.to_string());
+                return;
+            }
         }
 
-        match manager.wait_ready().await {
+        self.set_state(
+            LlmState::Starting,
+            format!(
+                "Cargando {model_name} · {} capas GPU",
+                self.config.llm.gpu_layers
+            ),
+        );
+
+        let ready = match self.llm.as_mut() {
+            Some(manager) => manager.wait_ready().await,
+            None => return,
+        };
+
+        match ready {
             Ok(()) => {
                 let detail = format!(
-                    "{} · {} capas GPU",
-                    self.config
-                        .llm
-                        .model
-                        .as_ref()
-                        .map(|path| path.display().to_string())
-                        .unwrap_or_else(|| "modelo".to_owned()),
-                    self.config.llm.gpu_layers
+                    "{model_name} · {} capas GPU · {}",
+                    self.config.llm.gpu_layers,
+                    self.config.llm.base_url()
                 );
-                self.emit(EngineEvent::Llm {
-                    state: LlmState::Ready,
-                    detail,
-                });
+                self.set_state(LlmState::Ready, detail);
             }
             Err(error) => {
                 self.emit_error("llm", error.to_string());
-                self.emit(EngineEvent::Llm {
-                    state: LlmState::Error,
-                    detail: "El motor no llegó a estar listo".to_owned(),
-                });
+                self.set_state(
+                    LlmState::Error,
+                    "El motor no llegó a estar listo".to_owned(),
+                );
             }
         }
-
-        self.llm = Some(manager);
     }
 
-    async fn stop_llm(&mut self) {
-        if let Some(mut llm) = self.llm.take() {
-            llm.stop().await;
+    fn external_state(&mut self, probe: &ServerProbe) {
+        if self.config.llm.endpoint.trim().is_empty() {
+            self.set_state(
+                LlmState::Error,
+                "Falta el endpoint externo (Ajustes → Motor LLM)".to_owned(),
+            );
+        } else if probe.reachable {
+            self.set_state(LlmState::Starting, probe.detail.clone());
+        } else {
+            self.set_state(
+                LlmState::Error,
+                format!(
+                    "No se pudo conectar a {} · inicia el servidor o revisa el puerto",
+                    self.config.llm.chat_completions_url()
+                ),
+            );
+        }
+    }
+
+    /// Probing pass while idle: detects external servers, child exits and
+    /// servers that went away.
+    async fn tick(&mut self) {
+        if let Some(manager) = self.llm.as_mut()
+            && let Some((code, logs)) = manager.poll_exit()
+        {
+            let message = format!(
+                "llama-server terminó (código {code:?}). {}",
+                truncate(&logs, 400)
+            );
+            self.emit_error("llm", message.clone());
+            self.set_state(LlmState::Error, message);
+        }
+
+        if !self.ensure_manager() {
+            return;
+        }
+        self.sync_manager_config();
+
+        let probe = match self.llm.as_ref() {
+            Some(manager) => manager.probe().await,
+            None => return,
+        };
+        self.adopt_models(&probe);
+        self.probe = probe.clone();
+
+        if probe.ready {
+            self.set_state(LlmState::Ready, probe.detail);
+            return;
+        }
+
+        if self.llm.as_ref().is_some_and(LlamaManager::is_running) {
+            self.set_state(LlmState::Starting, probe.detail);
+            return;
+        }
+
+        if probe.reachable {
+            self.set_state(LlmState::Starting, probe.detail);
+            return;
+        }
+
+        // Nothing is listening. Do not overwrite an error that explains why.
+        if self.state != LlmState::Error {
+            let hint = if self.config.llm.is_managed() {
+                format!(
+                    "{} · inicia llama-server o pulsa Reiniciar motor",
+                    probe.detail
+                )
+            } else {
+                probe.detail.clone()
+            };
+            self.set_state(LlmState::Stopped, hint);
+        }
+    }
+
+    async fn probe_now(&mut self) -> ServerProbe {
+        if !self.ensure_manager() {
+            return self.probe.clone();
+        }
+        self.sync_manager_config();
+
+        let probe = match self.llm.as_ref() {
+            Some(manager) => manager.probe().await,
+            None => return self.probe.clone(),
+        };
+        self.adopt_models(&probe);
+        self.probe = probe.clone();
+
+        if probe.ready {
+            self.set_state(LlmState::Ready, probe.detail.clone());
+        } else if probe.reachable {
+            self.set_state(LlmState::Starting, probe.detail.clone());
+        } else if self.state != LlmState::Error {
+            self.set_state(LlmState::Stopped, probe.detail.clone());
+        }
+
+        probe
+    }
+
+    async fn stop_child(&mut self) {
+        if let Some(mut manager) = self.llm.take() {
+            manager.stop().await;
         }
         self.active.store(0, Ordering::Relaxed);
         self.streaming = None;
-        self.emit(EngineEvent::Llm {
-            state: LlmState::Stopped,
-            detail: "Detenido por el usuario".to_owned(),
-        });
     }
 
     async fn handle(&mut self, command: EngineCommand) -> bool {
         match command {
-            EngineCommand::StartLlm => self.start_llm().await,
-            EngineCommand::StopLlm => self.stop_llm().await,
+            EngineCommand::StartLlm => self.refresh(true).await,
+            EngineCommand::StopLlm => {
+                self.stop_child().await;
+                self.set_state(LlmState::Stopped, "Detenido por el usuario".to_owned());
+            }
             EngineCommand::RestartLlm => {
-                self.stop_llm().await;
-                self.start_llm().await;
+                self.stop_child().await;
+                self.resolved_model.clear();
+                self.refresh(true).await;
             }
             EngineCommand::ReloadConfig(config) => {
-                if let Some(mut llm) = self.llm.take() {
-                    llm.stop().await;
-                }
+                self.stop_child().await;
                 self.history.clear();
-                self.streaming = None;
                 self.active.store(0, Ordering::Relaxed);
                 self.config = *config;
-
-                if self.config.llm.auto_start {
-                    self.start_llm().await;
-                } else {
-                    self.emit(EngineEvent::Llm {
-                        state: LlmState::Stopped,
-                        detail: "Configuración aplicada".to_owned(),
-                    });
-                }
-                self.probe();
+                self.resolved_model.clear();
+                self.llm = None;
+                self.refresh(true).await;
+            }
+            EngineCommand::ProbeLlm => {
+                self.probe_now().await;
             }
             EngineCommand::SendMessage { generation, prompt } => {
                 self.send_message(generation, prompt).await;
@@ -265,10 +463,7 @@ impl Controller {
             }
             EngineCommand::Speak { .. } => {
                 if self.config.tts.backend == TtsBackend::Disabled {
-                    self.emit_error(
-                        "tts",
-                        "No hay motor TTS conectado (Ajustes → Síntesis).",
-                    );
+                    self.emit_error("tts", "No hay motor TTS conectado (Ajustes → Síntesis).");
                 } else {
                     self.emit_error(
                         "tts",
@@ -282,7 +477,7 @@ impl Controller {
                     "La captura de audio aún no está conectada en esta compilación.",
                 );
             }
-            EngineCommand::ProbeTools => self.probe(),
+            EngineCommand::ProbeTools => self.emit_diagnostics().await,
             EngineCommand::Shutdown => return false,
         }
 
@@ -290,14 +485,18 @@ impl Controller {
     }
 
     async fn send_message(&mut self, generation: u64, prompt: String) {
-        if self.config.llm.is_managed() && self.llm.is_none() {
-            self.start_llm().await;
+        // If the status is stale (server just started), probe before failing.
+        if self.state != LlmState::Ready {
+            self.refresh(self.config.llm.is_managed()).await;
         }
 
-        if self.llm.is_none() {
+        if self.state != LlmState::Ready {
             self.emit_error(
                 "llm",
-                "El motor no está disponible. Revisa Ajustes → Motor LLM y pulsa Aplicar.",
+                format!(
+                    "El motor no está listo: {}. Revisa Ajustes → Motor LLM.",
+                    self.detail
+                ),
             );
             return;
         }
@@ -388,9 +587,30 @@ impl Controller {
         }
     }
 
-    fn probe(&self) {
+    async fn emit_diagnostics(&mut self) {
+        let probe = self.probe_now().await;
         let cfg = &self.config;
         let mut items = Vec::new();
+
+        items.push(DiagnosticItem {
+            name: "Servidor LLM (en vivo)".to_owned(),
+            value: probe.detail.clone(),
+            ok: probe.ready,
+        });
+
+        items.push(DiagnosticItem {
+            name: "Endpoint de chat".to_owned(),
+            value: cfg.llm.chat_completions_url(),
+            ok: true,
+        });
+
+        if let Some(model) = probe.first_model() {
+            items.push(DiagnosticItem {
+                name: "Modelo reportado".to_owned(),
+                value: model,
+                ok: true,
+            });
+        }
 
         match cfg.llm.mode {
             LlmMode::Managed => {
@@ -402,21 +622,24 @@ impl Controller {
                     ok,
                 });
                 items.push(DiagnosticItem {
-                    name: "Endpoint".to_owned(),
-                    value: cfg.llm.chat_completions_url(),
+                    name: "Escucha gestionada".to_owned(),
+                    value: format!(
+                        "{}:{} · {} capas GPU",
+                        cfg.llm.host, cfg.llm.port, cfg.llm.gpu_layers
+                    ),
                     ok: true,
                 });
             }
             LlmMode::External => {
-                let endpoint = cfg.llm.endpoint.trim();
+                let endpoint = cfg.llm.normalized_endpoint();
                 items.push(DiagnosticItem {
                     name: "Endpoint externo".to_owned(),
                     value: if endpoint.is_empty() {
                         "sin configurar".to_owned()
                     } else {
-                        cfg.llm.chat_completions_url()
+                        endpoint.clone()
                     },
-                    ok: endpoint.starts_with("http://") || endpoint.starts_with("https://"),
+                    ok: !endpoint.is_empty(),
                 });
             }
         }
@@ -447,10 +670,10 @@ impl Controller {
                 let program = shared::tools::command_program(&cfg.tts.command);
                 let (ok, value) = match program {
                     Some(program) => {
-                        let resolved =
-                            shared::tools::resolve_binary(std::path::Path::new(program));
-                        match resolved {
-                            Some(path) => (true, format!("{} · {}", path.display(), cfg.tts.command)),
+                        match shared::tools::resolve_binary(std::path::Path::new(program)) {
+                            Some(path) => {
+                                (true, format!("{} · {}", path.display(), cfg.tts.command))
+                            }
                             None => (false, format!("no encontrado: {program}")),
                         }
                     }
@@ -494,6 +717,15 @@ impl Controller {
     }
 }
 
+fn truncate(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let mut truncated: String = text.chars().take(max).collect();
+    truncated.push('…');
+    truncated
+}
+
 fn binary_item(name: &str, binary: &std::path::Path) -> DiagnosticItem {
     match shared::tools::resolve_binary(binary) {
         Some(path) => DiagnosticItem {
@@ -518,5 +750,245 @@ async fn next_command(receiver: Arc<Receiver<EngineCommand>>) -> Option<EngineCo
             }
             Err(TryRecvError::Disconnected) => return None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+    use std::time::Instant;
+
+    /// Minimal OpenAI-compatible server used by the controller tests.
+    struct MockServer {
+        port: u16,
+        stop: Arc<AtomicBool>,
+        last_body: Arc<Mutex<String>>,
+        join: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl MockServer {
+        fn start() -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+            let port = listener.local_addr().expect("addr").port();
+            listener
+                .set_nonblocking(true)
+                .expect("non blocking listener");
+
+            let stop = Arc::new(AtomicBool::new(false));
+            let last_body = Arc::new(Mutex::new(String::new()));
+            let stop_thread = Arc::clone(&stop);
+            let body_thread = Arc::clone(&last_body);
+
+            let join = std::thread::spawn(move || {
+                while !stop_thread.load(AtomicOrdering::Relaxed) {
+                    match listener.accept() {
+                        Ok((stream, _)) => handle_mock(stream, &body_thread),
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+
+            Self {
+                port,
+                stop,
+                last_body,
+                join: Some(join),
+            }
+        }
+
+        fn body(&self) -> String {
+            self.last_body.lock().expect("body lock").clone()
+        }
+    }
+
+    impl Drop for MockServer {
+        fn drop(&mut self) {
+            self.stop.store(true, AtomicOrdering::Relaxed);
+            // Wake the accept loop so the thread can exit.
+            let _ = TcpStream::connect(("127.0.0.1", self.port));
+            if let Some(join) = self.join.take() {
+                let _ = join.join();
+            }
+        }
+    }
+
+    fn handle_mock(mut stream: TcpStream, last_body: &Arc<Mutex<String>>) {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("read timeout");
+
+        let mut buffer = Vec::new();
+        let mut chunk = [0_u8; 1024];
+        let header_end = loop {
+            match stream.read(&mut chunk) {
+                Ok(0) => return,
+                Ok(read) => buffer.extend_from_slice(&chunk[..read]),
+                Err(_) => return,
+            }
+
+            if let Some(position) = find_bytes(&buffer, b"\r\n\r\n") {
+                break position + 4;
+            }
+        };
+
+        let head = String::from_utf8_lossy(&buffer[..header_end]).to_string();
+        let path = head
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap_or("/")
+            .to_owned();
+        let content_length = head
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                if name.eq_ignore_ascii_case("content-length") {
+                    value.trim().parse::<usize>().ok()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0);
+
+        while buffer.len() < header_end + content_length {
+            match stream.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(read) => buffer.extend_from_slice(&chunk[..read]),
+                Err(_) => break,
+            }
+        }
+
+        let body = String::from_utf8_lossy(&buffer[header_end..]).to_string();
+        if path.contains("chat/completions") {
+            *last_body.lock().expect("body lock") = body;
+        }
+
+        let response = if path.ends_with("/v1/models") || path == "/models" {
+            let body = r#"{"object":"list","data":[{"id":"mock-qwen","object":"model"}]}"#;
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+        } else if path.contains("chat/completions") {
+            let body = concat!(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"Hola\"}}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":\" mundo\"}}]}\n\n",
+                "data: [DONE]\n\n"
+            );
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+        } else {
+            let body = r#"{"error":"not found"}"#;
+            format!(
+                "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+        };
+
+        let _ = stream.write_all(response.as_bytes());
+        let _ = stream.flush();
+    }
+
+    fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+        haystack
+            .windows(needle.len())
+            .position(|window| window == needle)
+    }
+
+    fn wait_until_ready(handle: &EngineHandle, seconds: u64) -> Option<String> {
+        let deadline = Instant::now() + Duration::from_secs(seconds);
+        while Instant::now() < deadline {
+            if let Some(EngineEvent::Llm { state, detail }) =
+                handle.recv_timeout(Duration::from_millis(100))
+                && state == LlmState::Ready
+            {
+                return Some(detail);
+            }
+        }
+        None
+    }
+
+    fn external_config(endpoint: String) -> VoxConfig {
+        let mut config = VoxConfig::default();
+        config.llm.mode = LlmMode::External;
+        config.llm.endpoint = endpoint;
+        config.llm.auto_start = false;
+        config
+    }
+
+    #[test]
+    fn detects_external_server_without_a_configured_model() {
+        let server = MockServer::start();
+        let mut config = VoxConfig::default();
+        config.llm.mode = LlmMode::Managed;
+        config.llm.model = None;
+        config.llm.host = "127.0.0.1".to_owned();
+        config.llm.port = server.port;
+        config.llm.auto_start = false;
+
+        let handle = spawn(config);
+        assert!(
+            handle.send(EngineCommand::ProbeLlm),
+            "controller should accept commands"
+        );
+
+        let detail = wait_until_ready(&handle, 5).expect("external server must be detected");
+        assert!(detail.contains("Servidor"), "detail was: {detail}");
+        let _ = handle.send(EngineCommand::Shutdown);
+    }
+
+    #[test]
+    fn chats_against_external_endpoint_and_uses_reported_model() {
+        let server = MockServer::start();
+        // Bare host:port must be normalized to http://host:port.
+        let handle = spawn(external_config(format!("127.0.0.1:{}", server.port)));
+
+        let detail = wait_until_ready(&handle, 5).expect("external server must be detected");
+        assert!(detail.contains("openai") || detail.contains("OpenAI") || detail.contains("listo"));
+
+        let generation = 1_u64;
+        assert!(handle.send(EngineCommand::SendMessage {
+            generation,
+            prompt: "Hola".to_owned(),
+        }));
+
+        let mut reply = String::new();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut finished = false;
+        while Instant::now() < deadline && !finished {
+            if let Some(event) = handle.recv_timeout(Duration::from_millis(100)) {
+                match event {
+                    EngineEvent::Token { delta, .. } => reply.push_str(&delta),
+                    EngineEvent::ReplyDone { .. } => finished = true,
+                    EngineEvent::Error { message, .. } => panic!("controller error: {message}"),
+                    _ => {}
+                }
+            }
+        }
+
+        assert!(finished, "reply should finish, got: {reply:?}");
+        assert_eq!(reply, "Hola mundo");
+        assert!(
+            server.body().contains("\"model\":\"mock-qwen\""),
+            "chat request should use the reported model id, body was: {}",
+            server.body()
+        );
+
+        let _ = handle.send(EngineCommand::Shutdown);
+    }
+
+    #[test]
+    fn truncate_keeps_utf8_boundaries() {
+        assert_eq!(truncate("hola", 10), "hola");
+        assert_eq!(truncate("hola mundo", 4), "hola…");
     }
 }

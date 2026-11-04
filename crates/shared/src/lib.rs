@@ -14,6 +14,6 @@ pub use config::{
     UiConfig, VadConfig, VoxConfig,
 };
 pub use event::{
-    engine_channel, DiagnosticItem, EngineCommand, EngineEvent, EngineHandle, LlmState,
+    DiagnosticItem, EngineCommand, EngineEvent, EngineHandle, LlmState, engine_channel,
 };
 pub use text::for_speech;

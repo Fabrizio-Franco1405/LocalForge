@@ -4,6 +4,9 @@
 //! Nothing in this file downloads, installs or probes the network; the tools
 //! page reports what is missing and leaves the decision to the user.
 
+use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::Sizable as _;
+use gpui_kit::component::button::Button;
 use gpui_kit::component::setting::{
     NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings,
 };
@@ -12,7 +15,10 @@ use shared::{LlmMode, TtsBackend, VoxConfig};
 
 use crate::config;
 
-const LLM_MODES: [(&str, &str); 2] = [("Gestionado por VoxLocal", "managed"), ("Servidor externo", "external")];
+const LLM_MODES: [(&str, &str); 2] = [
+    ("Gestionado por VoxLocal", "managed"),
+    ("Servidor externo", "external"),
+];
 const TTS_BACKENDS: [(&str, &str); 3] = [
     ("Desactivado", "disabled"),
     ("Kokoro CLI (BYO)", "kokoro_cli"),
@@ -35,6 +41,14 @@ const THEMES: [(&str, &str); 3] = [
     ("Oscuro", "dark"),
     ("Claro", "light"),
     ("Sistema", "system"),
+];
+const ACCENTS: [(&str, &str); 6] = [
+    ("Violeta", "violet"),
+    ("Azul", "blue"),
+    ("Esmeralda", "emerald"),
+    ("Ámbar", "amber"),
+    ("Rosa", "rose"),
+    ("Personalizado", "custom"),
 ];
 
 fn text_field<G, S>(get: G, set: S) -> SettingField<SharedString>
@@ -68,6 +82,82 @@ where
             config::update(cx, |cfg| set(cfg, parsed));
         },
     )
+}
+
+/// What the native dialog should pick.
+#[derive(Clone, Copy)]
+enum Pick {
+    /// Any existing file.
+    File,
+    /// A file filtered by extension.
+    Typed(&'static str, &'static [&'static str]),
+    /// A directory.
+    Folder,
+}
+
+/// Native explorer button shown under a path input.
+fn path_picker<G, S>(label: &'static str, pick: Pick, get: G, set: S) -> SettingItem
+where
+    G: Fn(&VoxConfig) -> Option<std::path::PathBuf> + 'static,
+    S: Fn(&mut VoxConfig, Option<std::path::PathBuf>) + 'static,
+{
+    let get = std::rc::Rc::new(get);
+    let set = std::rc::Rc::new(set);
+
+    SettingItem::render(move |_options, _window, cx| {
+        let current = get(&config::current(cx));
+        let shown = current
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "Sin seleccionar".to_owned());
+
+        let get_pick = std::rc::Rc::clone(&get);
+        let set_pick = std::rc::Rc::clone(&set);
+        let picker = move |_event: &gpui_kit::ClickEvent, _window: &mut Window, cx: &mut App| {
+            let mut dialog = rfd::FileDialog::new();
+
+            if let Some(path) = get_pick(&config::current(cx)) {
+                let directory = if path.is_dir() {
+                    Some(path.clone())
+                } else {
+                    path.parent().map(std::path::Path::to_path_buf)
+                };
+                if let Some(directory) = directory {
+                    dialog = dialog.set_directory(directory);
+                }
+            }
+
+            let picked = match pick {
+                Pick::Folder => dialog.pick_folder(),
+                Pick::File => dialog.pick_file(),
+                Pick::Typed(name, extensions) => dialog.add_filter(name, extensions).pick_file(),
+            };
+
+            if let Some(path) = picked {
+                config::update(cx, |cfg| set_pick(cfg, Some(path)));
+            }
+        };
+
+        div()
+            .flex()
+            .items_center()
+            .gap_3()
+            .child(
+                Button::new(format!("pick-{label}"))
+                    .small()
+                    .label(match pick {
+                        Pick::Folder => "Elegir carpeta…",
+                        Pick::File | Pick::Typed(..) => "Elegir archivo…",
+                    })
+                    .on_click(picker),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(shown),
+            )
+    })
 }
 
 fn bool_field<G, S>(get: G, set: S) -> SettingField<bool>
@@ -104,12 +194,7 @@ where
 {
     let options = options
         .iter()
-        .map(|(label, value)| {
-            (
-                SharedString::from(*label),
-                SharedString::from(*value),
-            )
-        })
+        .map(|(label, value)| (SharedString::from(*label), SharedString::from(*value)))
         .collect();
 
     SettingField::dropdown(
@@ -184,6 +269,18 @@ pub fn view(_cx: &App) -> impl IntoElement {
                     )
                     .item(
                         SettingItem::new(
+                            "ID del modelo",
+                            text_field(
+                                |cfg| cfg.llm.model_id.clone(),
+                                |cfg, value| cfg.llm.model_id = value.trim().to_owned(),
+                            ),
+                        )
+                        .description(
+                            "Opcional. Si se deja vacío, se usa el primer id que reporte /v1/models.",
+                        ),
+                    )
+                    .item(
+                        SettingItem::new(
                             "API key",
                             text_field(
                                 |cfg| cfg.llm.api_key.clone(),
@@ -207,6 +304,16 @@ pub fn view(_cx: &App) -> impl IntoElement {
                         )
                         .description("Nombre en PATH o ruta absoluta a tu compilación Vulkan."),
                     )
+                    .item(path_picker(
+                        "llama-server",
+                        Pick::File,
+                        |cfg| Some(cfg.llm.binary.clone()),
+                        |cfg, value| {
+                            if let Some(path) = value {
+                                cfg.llm.binary = path;
+                            }
+                        },
+                    ))
                     .item(
                         SettingItem::new(
                             "Modelo GGUF",
@@ -217,13 +324,29 @@ pub fn view(_cx: &App) -> impl IntoElement {
                         )
                         .description("Ruta absoluta al .gguf que quieras usar."),
                     )
-                    .item(SettingItem::new(
-                        "Host de escucha",
-                        text_field(
-                            |cfg| cfg.llm.host.clone(),
-                            |cfg, value| cfg.llm.host = value.trim().to_owned(),
-                        ),
+                    .item(path_picker(
+                        "Modelo GGUF",
+                        Pick::Typed("Modelo GGUF", &["gguf"]),
+                        |cfg| cfg.llm.model.clone(),
+                        |cfg, value| cfg.llm.model = value,
                     ))
+                    .item(
+                        SettingItem::new(
+                            "Host de escucha",
+                            text_field(
+                                |cfg| cfg.llm.host.clone(),
+                                |cfg, value| {
+                                    // Si el valor contiene una barra (/), ignorarlo y poner 127.0.0.1
+                                    if value.contains('/') {
+                                        cfg.llm.host = "127.0.0.1".to_owned();
+                                    } else {
+                                        cfg.llm.host = value.trim().to_owned();
+                                    }
+                                },
+                            ),
+                        )
+                        .description("Solo IP (ej: 127.0.0.1). No pegar rutas de archivos."),
+                    )
                     .item(SettingItem::new(
                         "Puerto",
                         number_field(
@@ -351,6 +474,16 @@ pub fn view(_cx: &App) -> impl IntoElement {
                         )
                         .description("Nombre en PATH o ruta absoluta."),
                     )
+                    .item(path_picker(
+                        "whisper-cli",
+                        Pick::File,
+                        |cfg| Some(cfg.stt.binary.clone()),
+                        |cfg, value| {
+                            if let Some(path) = value {
+                                cfg.stt.binary = path;
+                            }
+                        },
+                    ))
                     .item(
                         SettingItem::new(
                             "Modelo ggml",
@@ -361,6 +494,12 @@ pub fn view(_cx: &App) -> impl IntoElement {
                         )
                         .description("Ej: ~/.cache/whisper.cpp/ggml-base.bin"),
                     )
+                    .item(path_picker(
+                        "Modelo ggml",
+                        Pick::Typed("Modelo Whisper", &["bin"]),
+                        |cfg| cfg.stt.model.clone(),
+                        |cfg, value| cfg.stt.model = value,
+                    ))
                     .item(SettingItem::new(
                         "Idioma",
                         dropdown_field(
@@ -454,6 +593,16 @@ pub fn view(_cx: &App) -> impl IntoElement {
                             |cfg, value| cfg.tts.python = value.trim().into(),
                         ),
                     ))
+                    .item(path_picker(
+                        "Python",
+                        Pick::File,
+                        |cfg| Some(cfg.tts.python.clone()),
+                        |cfg, value| {
+                            if let Some(path) = value {
+                                cfg.tts.python = path;
+                            }
+                        },
+                    ))
                     .item(SettingItem::new(
                         "Script worker",
                         text_field(
@@ -461,12 +610,32 @@ pub fn view(_cx: &App) -> impl IntoElement {
                             |cfg, value| cfg.tts.worker_script = value.trim().into(),
                         ),
                     ))
+                    .item(path_picker(
+                        "Script Kokoro",
+                        Pick::Typed("Script Python", &["py"]),
+                        |cfg| Some(cfg.tts.worker_script.clone()),
+                        |cfg, value| {
+                            if let Some(path) = value {
+                                cfg.tts.worker_script = path;
+                            }
+                        },
+                    ))
                     .item(SettingItem::new(
                         "Carpeta del modelo",
                         text_field(
                             |cfg| cfg.tts.model_dir.to_string_lossy().into_owned(),
                             |cfg, value| cfg.tts.model_dir = value.trim().into(),
                         ),
+                    ))
+                    .item(path_picker(
+                        "Modelos Kokoro",
+                        Pick::Folder,
+                        |cfg| Some(cfg.tts.model_dir.clone()),
+                        |cfg, value| {
+                            if let Some(path) = value {
+                                cfg.tts.model_dir = path;
+                            }
+                        },
                     )),
             ),
         SettingPage::new("Audio y VAD")
@@ -589,6 +758,44 @@ pub fn view(_cx: &App) -> impl IntoElement {
                         ),
                     ))
                     .item(SettingItem::new(
+                        "Color de acento",
+                        dropdown_field(
+                            &ACCENTS,
+                            |cfg| cfg.ui.accent.clone(),
+                            |cfg, value| cfg.ui.accent = value,
+                        ),
+                    ))
+                    .item(
+                        SettingItem::new(
+                            "Acento personalizado",
+                            text_field(
+                                |cfg| cfg.ui.accent_custom.clone(),
+                                |cfg, value| cfg.ui.accent_custom = value.trim().to_owned(),
+                            ),
+                        )
+                        .description("Hex #rrggbb, usado cuando el acento es «Personalizado»."),
+                    )
+                    .item(SettingItem::new(
+                        "Radio de esquinas",
+                        number_field(
+                            0.0,
+                            20.0,
+                            1.0,
+                            |cfg| f64::from(cfg.ui.radius),
+                            |cfg, value| cfg.ui.radius = value as f32,
+                        ),
+                    ))
+                    .item(SettingItem::new(
+                        "Tamaño de fuente",
+                        number_field(
+                            11.0,
+                            20.0,
+                            0.5,
+                            |cfg| f64::from(cfg.ui.font_size),
+                            |cfg, value| cfg.ui.font_size = value as f32,
+                        ),
+                    ))
+                    .item(SettingItem::new(
                         "Mostrar panel de depuración",
                         bool_field(
                             |cfg| cfg.ui.show_debug,
@@ -617,6 +824,12 @@ pub fn view(_cx: &App) -> impl IntoElement {
                         )
                         .description("Vacío = carpeta estándar del sistema."),
                     )
+                    .item(path_picker(
+                        "Carpeta de datos",
+                        Pick::Folder,
+                        |cfg| cfg.paths.data_dir.clone(),
+                        |cfg, value| cfg.paths.data_dir = value,
+                    ))
                     .item(SettingItem::new(
                         "Carpeta de recursos",
                         text_field(
@@ -631,6 +844,12 @@ pub fn view(_cx: &App) -> impl IntoElement {
                                 cfg.paths.assets_dir = shared::tools::expand_path(&value);
                             },
                         ),
+                    ))
+                    .item(path_picker(
+                        "Carpeta de recursos",
+                        Pick::Folder,
+                        |cfg| cfg.paths.assets_dir.clone(),
+                        |cfg, value| cfg.paths.assets_dir = value,
                     )),
             ),
     ])

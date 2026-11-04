@@ -174,7 +174,7 @@ pub fn render_bubble(bubble: &Bubble, cx: &App) -> impl IntoElement {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::ChatLog;
 
     #[test]
     fn streamed_tokens_build_one_bubble() {

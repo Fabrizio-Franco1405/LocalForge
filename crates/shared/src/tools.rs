@@ -12,10 +12,10 @@ pub fn expand_path(input: &str) -> Option<PathBuf> {
         return None;
     }
 
-    if let Some(rest) = input.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return Some(home.join(rest));
-        }
+    if let Some(rest) = input.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return Some(home.join(rest));
     }
 
     Some(PathBuf::from(input))
