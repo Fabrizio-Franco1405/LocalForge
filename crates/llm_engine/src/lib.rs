@@ -86,6 +86,7 @@ impl ChatMessage {
 /// Streaming events produced by [`LlamaManager::chat_stream`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChatDelta {
+    Usage(u32),
     /// A piece of the reply.
     Delta(String),
     /// The server sent `[DONE]` or closed the stream normally.
@@ -475,6 +476,7 @@ impl LlamaManager {
             "temperature": temperature,
             "max_tokens": max_tokens,
             "cache_prompt": true,
+            "stream_options": { "include_usage": true },
         });
 
         let response = {
@@ -519,6 +521,11 @@ impl LlamaManager {
                     if payload == "[DONE]" {
                         let _ = tx.send(ChatDelta::Done).await;
                         return;
+                    }
+
+                    if let Some(used) = parse_usage(&payload) {
+                        let _ = tx.send(ChatDelta::Usage(used)).await;
+                        continue;
                     }
 
                     match parse_delta(&payload) {
@@ -701,6 +708,15 @@ pub fn parse_delta(payload: &str) -> Result<Option<String>, String> {
         .filter(|content| !content.is_empty()))
 }
 
+fn parse_usage(payload: &str) -> Option<u32> {
+    let value: serde_json::Value = serde_json::from_str(payload).ok()?;
+    value
+        .get("usage")?
+        .get("total_tokens")?
+        .as_u64()
+        .map(|v| v as u32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -716,6 +732,15 @@ mod tests {
             threads: 8,
             ..LlmConfig::default()
         }
+    }
+
+    fn parse_usage(payload: &str) -> Option<u32> {
+        let value: serde_json::Value = serde_json::from_str(payload).ok()?;
+        value
+            .get("usage")?
+            .get("total_tokens")?
+            .as_u64()
+            .map(|v| v as u32)
     }
 
     #[test]

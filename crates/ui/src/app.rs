@@ -63,6 +63,8 @@ pub struct VoxApp {
     probing: bool,
     notice: Option<String>,
     scroll: ScrollHandle,
+    context_used: u32,
+    context_total: u32,
 }
 
 impl VoxApp {
@@ -113,6 +115,8 @@ impl VoxApp {
             probing: false,
             notice: None,
             scroll: ScrollHandle::new(),
+            context_used: 0,
+            context_total: 0,
         };
 
         app.probe(cx);
@@ -192,6 +196,11 @@ impl VoxApp {
             EngineEvent::Diagnostics { items } => {
                 self.diagnostics = items;
                 self.probing = false;
+                true
+            }
+            EngineEvent::ContextUsage { used, total } => {
+                self.context_used = used;
+                self.context_total = total;
                 true
             }
             EngineEvent::Error { scope, message } => {
@@ -733,10 +742,22 @@ impl VoxApp {
                     .justify_between()
                     .gap_3()
                     .child(
+                        // AQUÍ AGRUPAMOS EL TEXTO Y EL CONTADOR DE CONTEXTO
                         div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child("Enter envía · Shift+Enter no está disponible en este campo"),
+                            .flex()
+                            .items_center()
+                            .gap_4()
+                            .child(div().text_xs().text_color(theme.muted_foreground).child(
+                                "Enter envía · Shift+Enter no está disponible en este campo",
+                            ))
+                            // --- BARRA DE CONTEXTO ---
+                            .when(self.context_total > 0, |this| {
+                                this.child(Self::render_context_bar(
+                                    self.context_used,
+                                    self.context_total,
+                                    cx,
+                                ))
+                            }),
                     )
                     .when(self.listening, |this| {
                         this.child(
@@ -903,6 +924,24 @@ impl VoxApp {
                 },
                 cx,
             ))
+    }
+
+    /// Dibuja el indicador de contexto.
+    pub fn render_context_bar(used: u32, total: u32, cx: &App) -> impl IntoElement {
+        let theme = cx.theme();
+        let is_high = used as f32 / total as f32 > 0.8; // Si pasa del 80%, se pone rojo
+        let text_color = if is_high {
+            theme.danger
+        } else {
+            theme.muted_foreground
+        };
+
+        div().flex().items_center().gap_2().child(
+            div()
+                .text_xs()
+                .text_color(text_color)
+                .child(format!("Memoria: {} / {} tokens", used, total)),
+        )
     }
 
     fn status_bar(&self, cx: &App) -> impl IntoElement {

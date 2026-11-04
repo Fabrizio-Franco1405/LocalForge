@@ -337,6 +337,8 @@ impl Controller {
 
     /// Probing pass while idle: detects external servers, child exits and
     /// servers that went away.
+    /// Probing pass while idle: detects external servers, child exits and
+    /// servers that went away.
     async fn tick(&mut self) {
         if let Some(manager) = self.llm.as_mut()
             && let Some((code, logs)) = manager.poll_exit()
@@ -361,22 +363,28 @@ impl Controller {
         self.adopt_models(&probe);
         self.probe = probe.clone();
 
+        // 1. Si está listo, actualizamos botón Y herramientas
         if probe.ready {
             self.set_state(LlmState::Ready, probe.detail);
+            self.emit_diagnostics().await; // <--- AÑADIDO AQUÍ
             return;
         }
 
+        // 2. Si está arrancando, actualizamos botón Y herramientas
         if self.llm.as_ref().is_some_and(LlamaManager::is_running) {
             self.set_state(LlmState::Starting, probe.detail);
+            self.emit_diagnostics().await; // <--- AÑADIDO AQUÍ
             return;
         }
 
+        // 3. Si es alcanzable, actualizamos botón Y herramientas
         if probe.reachable {
             self.set_state(LlmState::Starting, probe.detail);
+            self.emit_diagnostics().await; // <--- AÑADIDO AQUÍ
             return;
         }
 
-        // Nothing is listening. Do not overwrite an error that explains why.
+        // 4. Si está apagado, actualizamos botón Y herramientas
         if self.state != LlmState::Error {
             let hint = if self.config.llm.is_managed() {
                 format!(
@@ -388,6 +396,7 @@ impl Controller {
             };
             self.set_state(LlmState::Stopped, hint);
         }
+        self.emit_diagnostics().await; // <--- Y AQUÍ AL FINAL POR SI ACASO
     }
 
     async fn probe_now(&mut self) -> ServerProbe {
@@ -537,6 +546,9 @@ impl Controller {
         let internal = self.internal_tx.clone();
         let active = Arc::clone(&self.active);
 
+        // --- ¡AQUÍ ESTÁ LA SOLUCIÓN! Guardamos el ctx_size antes del spawn ---
+        let total_context = self.config.llm.ctx_size;
+
         tokio::spawn(async move {
             let mut text = String::new();
 
@@ -551,6 +563,15 @@ impl Controller {
                             generation,
                             delta: chunk,
                         });
+                    }
+                    // --- USAMOS LA VARIABLE LOCAL ---
+                    ChatDelta::Usage(used) => {
+                        if active.load(Ordering::Relaxed) == generation {
+                            let _ = events.send(EngineEvent::ContextUsage {
+                                used,
+                                total: total_context,
+                            });
+                        }
                     }
                     ChatDelta::Done => break,
                     ChatDelta::Error(message) => {
@@ -572,16 +593,20 @@ impl Controller {
     fn handle_internal(&mut self, internal: Internal) {
         match internal {
             Internal::ReplyFinished { generation, text } => {
-                if self.streaming != Some(generation) {
-                    return;
-                }
-
                 if !text.trim().is_empty() {
                     self.history.push(ChatMessage::assistant(text.clone()));
                 }
+
+                // --- LÓGICA DE VENTANA DESLIZANTE ---
+                // Mantenemos el System Prompt (índice 0) y solo 10 mensajes recientes.
+                // Si el historial crece demasiado, borramos los más antiguos.
+                while self.history.len() > 11 {
+                    self.history.remove(1); // Elimina el mensaje de usuario más antiguo
+                    self.history.remove(1); // Elimina la respuesta del asistente más antigua
+                }
+
                 self.streaming = None;
                 self.active.store(0, Ordering::Relaxed);
-
                 self.emit(EngineEvent::ReplyDone { generation, text });
             }
         }

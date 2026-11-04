@@ -129,6 +129,12 @@ pub enum EngineEvent {
         /// Checks, in display order.
         items: Vec<DiagnosticItem>,
     },
+    ContextUsage {
+        /// Tokens usados en el historial actual.
+        used: u32,
+        /// Límite máximo configurado (-c).
+        total: u32,
+    },
     /// A recoverable error. The operation that produced it is finished.
     Error {
         /// Component that failed (`llm`, `stt`, `tts`, `audio`).
