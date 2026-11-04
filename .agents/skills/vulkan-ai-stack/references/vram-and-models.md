@@ -51,7 +51,7 @@ In order of least quality loss:
 
 ## Concurrency policy
 
-VoxLocal serializes heavy inference:
+LocalForge serializes heavy inference:
 
 - While the LLM generates, whisper is idle (unless VAD detected a barge-in).
 - TTS runs on CPU, overlapped with generation only for completed sentences.

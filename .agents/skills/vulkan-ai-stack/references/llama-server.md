@@ -1,6 +1,6 @@
 # llama-server reference (target: llama.cpp b12003+)
 
-## Endpoints used by VoxLocal
+## Endpoints used by LocalForge
 
 ### Health
 
@@ -60,7 +60,7 @@ Non-streaming: `choices[0].message.content`; usage in `usage`.
 
 ## Flags
 
-| Flag | Default | VoxLocal |
+| Flag | Default | LocalForge |
 | --- | --- | --- |
 | `-m, --model` | — | required |
 | `-c, --ctx-size` | model | 4096 |

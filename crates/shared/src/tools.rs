@@ -1,6 +1,6 @@
 //! Tool discovery and path helpers.
 //!
-//! VoxLocal does not install anything: it resolves what the user configured,
+//! LocalForge does not install anything: it resolves what the user configured,
 //! reports whether it exists, and lets the UI explain what is missing.
 
 use std::path::{Path, PathBuf};

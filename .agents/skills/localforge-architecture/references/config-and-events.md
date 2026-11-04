@@ -52,14 +52,20 @@ max_utterance_ms = 30000
 [ui]
 theme = "dark"
 show_debug = false
+
+[scene3d]
+enabled = false
+backend = "disabled"
+endpoint = ""
+command = ""
 ```
 
 Environment overrides:
 
 ```bash
-VOXLOCAL_LLM__PORT=9940
-VOXLOCAL_STT__LANGUAGE=en
-VOXLOCAL_AUDIO__VAD__MIN_SILENCE_MS=800
+LOCALFORGE_LLM__PORT=9940
+LOCALFORGE_STT__LANGUAGE=en
+LOCALFORGE_AUDIO__VAD__MIN_SILENCE_MS=800
 ```
 
 ## Loading rules
@@ -138,6 +144,6 @@ Never emit `Error` and then keep emitting deltas for the same generation.
 ## Persistence
 
 - Config: TOML at `VoxConfig::default_path()`.
-- Sessions (M1): JSONL at `dirs::data_dir()/voxlocal/sessions/<timestamp>.jsonl`.
-- Logs: `dirs::data_dir()/voxlocal/logs/voxlocal.log` (rotating, 5 files × 10 MB).
+- Sessions (M1): JSONL at `dirs::data_dir()/localforge/sessions/<timestamp>.jsonl`.
+- Logs: `dirs::data_dir()/localforge/logs/localforge.log` (rotating, 5 files × 10 MB).
 - Never store audio by default; STT temp WAVs are deleted after transcription.

@@ -1,6 +1,6 @@
 //! Live theme customization.
 //!
-//! GPUI Kit ships dark/light themes; VoxLocal adds an accent color, corner
+//! GPUI Kit ships dark/light themes; LocalForge adds an accent color, corner
 //! radius and base font size on top so the hub can match the user's desktop
 //! without shipping a full theme file.
 

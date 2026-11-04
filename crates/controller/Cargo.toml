@@ -1,0 +1,15 @@
+[package]
+name = "controller"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+shared = { workspace = true }
+llm_engine = { workspace = true }
+crossbeam-channel = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

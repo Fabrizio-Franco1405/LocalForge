@@ -78,7 +78,7 @@ Notas:
 
 Flags de servicio relevantes (v0.8+):
 
-| Flag | Uso en VoxLocal |
+| Flag | Uso en LocalForge |
 | --- | --- |
 | `-m, --model` | GGUF local |
 | `-c, --ctx-size` | 4096 por defecto; subir solo si hay VRAM |

@@ -5,7 +5,7 @@
 //!
 //! ```no_run
 //! use llm_engine::{LlamaManager, ChatMessage};
-//! use shared::LlmConfig;
+//! use shared::{LlmConfig, LlmMode};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let cfg = LlmConfig::default();
@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use shared::LlmConfig;
+use shared::{LlmConfig, LlmMode};
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
@@ -346,9 +346,17 @@ impl LlamaManager {
     /// Full status probe used by the controller and the tools page.
     ///
     /// It asks both `/health` (llama.cpp) and `/v1/models` (any
-    /// OpenAI-compatible server), so a server started outside VoxLocal is
+    /// OpenAI-compatible server), so a server started outside LocalForge is
     /// detected even when the app has no model configured.
     pub async fn probe(&self) -> ServerProbe {
+        if self.config.mode == LlmMode::External && self.config.endpoint.trim().is_empty() {
+            return ServerProbe {
+                detail: "Falta el endpoint externo: pégalo en Motor LLM y pulsa Probar conexión"
+                    .to_owned(),
+                ..ServerProbe::default()
+            };
+        }
+
         let base = self.config.http_base();
         let origin = strip_v1(&base);
         let mut probe = ServerProbe {

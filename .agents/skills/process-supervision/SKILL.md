@@ -2,13 +2,13 @@
 name: process-supervision
 description: >
   Use when spawning, monitoring, restarting, or shutting down external
-  processes in VoxLocal: llama-server, whisper-cli, the Kokoro worker, port
+  processes in LocalForge: llama-server, whisper-cli, the Kokoro worker, port
   allocation, health checks, stderr capture, zombie prevention, cancellation,
   and cross-platform process cleanup (tokio and std).
 license: MIT
 compatibility: tokio 1.x, Rust 1.92+, Linux/Windows/macOS
 metadata:
-  author: voxlocal
+  author: localforge
   version: "0.1.0"
 ---
 

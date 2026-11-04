@@ -7,16 +7,18 @@ Los criterios de aceptación se prueban en la máquina objetivo (RX 5700 XT +
 
 ## M0 — Fundaciones (estado real)
 
-- [x] Workspace de 6 crates + shell GPUI Kit (bin + lib).
+- [x] Workspace modular de 8 crates + binario GPUI mínimo.
 - [x] `VoxConfig` con TOML, variables de entorno y valores por defecto.
 - [x] Contratos `EngineCommand` / `EngineEvent` y `EngineHandle`.
 - [x] `LlamaManager` con spawn, health-check, streaming SSE, modo externo y limpieza.
-- [x] Controlador: comandos, generaciones, diagnóstico y apagado.
-- [x] UI: chat + ajustes + herramientas + barra de estado.
+- [x] Controlador en `crates/controller`: comandos, generaciones, diagnóstico y apagado.
+- [x] UI componentizada: sidebar LLM/Audio/3D/General, chat, diagnóstico y barra de estado.
+- [x] Config en `localforge/config.toml` con migración desde la ruta antigua.
 - [x] Suite de pruebas aislada en `test/` (42 tests, fuera de git).
 - [ ] `WhisperCli` (WAV 16 kHz + parser) → M2.
 - [ ] `KokoroCli` + worker Python → M3.
 - [ ] `AudioCapture`, `AudioPlayer`, `EndpointDetector` y `LinearResampler` → M2/M4.
+- [ ] `scene3d` (motor 3D) → M6.
 
 **Criterio:** `cargo run` abre la app, guarda ajustes y conversa por texto con
 un GGUF local o un servidor OpenAI externo.
@@ -80,3 +82,14 @@ funcional.
 - Traducción local opcional (NLLB/M2M ONNX) antes del LLM.
 - Perfiles por aplicación (juegos, oficina) para `-ngl` y contexto.
 - Telemetría local (nunca remota) para ajustar umbrales de VAD.
+
+## M6 — Motor 3D (futuro)
+
+- [ ] Definir backend (ComfyUI local, Blender CLI o pipeline propio) y su config.
+- [ ] `Scene3dEngine`: start/stop/health/generate con el mismo contrato que el LLM.
+- [ ] Progreso por etapas (cola, malla, textura) y cancelación.
+- [ ] Vista previa en la UI y selector de carpeta de salida.
+- [ ] Presupuesto de VRAM compartido con el LLM (nunca ambos a máxima carga en 8 GB).
+
+**Criterio:** generar una malla simple desde un prompt sin salir de la app y sin
+competir por la GPU con el chat.

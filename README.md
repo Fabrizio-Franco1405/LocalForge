@@ -1,7 +1,8 @@
-# VoxLocal
+# LocalForge
 
-Asistente de voz local y multiplataforma escrito en Rust. Habla con modelos de lenguaje
-que corren **en tu propia máquina**, sin nube, sin PyTorch y sin CUDA.
+Harness local de IA para tu máquina. Conecta tus propios motores —LLM, voz y,
+próximamente, 3D— sin nube, sin PyTorch y sin CUDA. Tú pones los binarios y los
+modelos; LocalForge orquesta procesos, health-checks y configuración.
 
 ```
 Micrófono ──► VAD ──► whisper.cpp (Vulkan) ──► llama.cpp (Vulkan) ──► Kokoro ONNX (CPU) ──► Altavoces
@@ -20,23 +21,40 @@ Micrófono ──► VAD ──► whisper.cpp (Vulkan) ──► llama.cpp (Vul
 
 > **Regla de oro:** si una dependencia exige CUDA, ROCm o PyTorch, se descarta. Vulkan o CPU.
 
+## Secciones
+
+El sidebar agrupa la configuración por motor, aislada entre sí. La conversación
+es la vista de inicio (se abre desde la marca o el botón «Conversación»).
+
+| Sección | Contenido |
+| --- | --- |
+| **Motor LLM** | Local (`llama-server` + GGUF + `-ngl` + host/puerto) o Externo (endpoint, model id, API key). Cada modo muestra solo sus campos |
+| **Motor Audio** | Whisper/STT, Kokoro/TTS, micrófono, VAD y playback |
+| **Motor 3D** | Reservado; visible como «próximamente», sin backend todavía |
+| **General** | Interfaz, rutas y acceso al diagnóstico |
+
+El cambio Local ⇄ Externo reconstruye la página al instante: en Local no verás
+endpoints y en Externo no verás rutas de `llama-server`. «Probar conexión»
+aplica el borrador y sondea el servidor, así puedes pegar `host:puerto` y
+detectarlo sin reiniciar la app.
+
 ## Estado
 
-- [x] Workspace de crates, shell GPUI Kit y librería `voxlocal` (bin + lib)
-- [x] Configuración segmentada y persistente (`shared`: TOML, `VOXLOCAL_*`, tools)
+- [x] Workspace modular: `shared`, `llm_engine`, `controller`, `ui` (+ stubs por motor)
+- [x] Configuración segmentada y persistente (`shared`: TOML, `LOCALFORGE_*`, tools)
 - [x] Gestión de `llama-server` con health-check, SSE y `-ngl` (`llm_engine`)
 - [x] Modo externo: detecta un servidor OpenAI local y usa el modelo de `/v1/models`
-- [x] UI de chat, ajustes y herramientas (`ui`)
-- [x] Controlador: comandos, generaciones, diagnóstico y apagado (`src/controller.rs`)
+- [x] Controlador como crate independiente (`crates/controller`)
+- [x] UI por secciones: sidebar LLM/Audio/3D/General, chat, diagnóstico y ajustes
 - [ ] STT con `whisper-cli` (`stt`) — stub documentado, hito M2
 - [ ] TTS Kokoro ONNX (`tts`) — stub documentado, hito M3
 - [ ] Captura, VAD y playback (`audio_engine`) — stub documentado, hitos M2/M4
+- [ ] Motor 3D (`scene3d`) — stub, sin fecha
 - [ ] Conversación manos libres completa (barge-in, streaming TTS)
 - [ ] Empaquetado e instaladores
 
 Los crates sin implementar compilan como placeholders con su contrato en el
-docstring; no fingen funcionalidad. Consulta [docs/ROADMAP.md](docs/ROADMAP.md)
-para el plan por hitos.
+docstring; no fingen funcionalidad. Consulta [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Inicio rápido
 
@@ -96,27 +114,27 @@ Todavía no hay worker de TTS: `tools/kokoro_worker.py` y `tools/setup_kokoro.sh
 se crearán con el hito M3. La app funciona sin ellos; el backend `tts` es un
 stub documentado y la UI lo muestra como deshabilitado.
 
-Cuando exista, creará un entorno aislado en `.venv-kokoro/` con `kokoro-onnx`
-(ONNX Runtime, no PyTorch) y descargará los modelos en `assets/models/kokoro/`.
-
 ### 5. Ejecutar
 
 ```bash
 cargo run
 ```
 
-La primera vez abre `Ajustes` para indicar las rutas de binarios y modelos. La
-configuración se guarda en:
+La primera vez abre **Motor LLM** para indicar el binario, el GGUF o el endpoint
+externo. La configuración se guarda en:
 
-- Linux: `~/.config/voxlocal/config.toml`
-- Windows: `%APPDATA%\voxlocal\config.toml`
-- macOS: `~/Library/Application Support/voxlocal/config.toml`
+- Linux: `~/.config/localforge/config.toml`
+- Windows: `%APPDATA%\localforge\config.toml`
+- macOS: `~/Library/Application Support/localforge/config.toml`
+
+Si vienes de VoxLocal, se migra una vez desde `voxlocal/config.toml`; el archivo
+antiguo no se borra.
 
 ## Documentación
 
 | Documento | Contenido |
 | --- | --- |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Crates, flujo de datos, hilos, decisiones de diseño |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Crates, flujo de datos, hilos, contratos y ADRs |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Hitos y criterios de aceptación |
 | [docs/HARDWARE-VULKAN.md](docs/HARDWARE-VULKAN.md) | RDNA 1, presupuestos de VRAM, builds y diagnóstico |
 | [docs/MODELS.md](docs/MODELS.md) | Modelos recomendados y descargas |
@@ -128,7 +146,7 @@ La suite vive en `test/`, es un crate propio **fuera del workspace** y está
 ignorada por git: el repositorio solo versiona el código de la app.
 
 ```bash
-cd test && cargo test        # 42 tests: shared, llm_engine, ui, controller
+cd test && cargo test        # 44 tests: shared, llm_engine, ui, controller
 ```
 
 No necesita GPU, micrófono ni modelos. El detalle (cobertura, fixtures y
@@ -139,12 +157,12 @@ checklist manual en la máquina objetivo) está en `test/README.md`,
 
 Las skills locales viven en `.agents/skills/` y son la guía operativa del proyecto:
 
-- `voxlocal-architecture` — límites entre crates y contratos
+- `localforge-architecture` — límites entre crates y contratos
 - `vulkan-ai-stack` — llama.cpp/whisper.cpp en Vulkan, RDNA 1 y VRAM
 - `gpui-kit-desktop` — GPUI Kit 0.9: Entity, Settings, tareas y tests
 - `voice-pipeline` — VAD, STT, LLM, TTS y latencia
 - `process-supervision` — procesos hijos, health-checks y limpieza
-- `voxlocal-workflow` — build, modelos, verificación y releases
+- `localforge-workflow` — build, modelos, verificación y releases
 - `rust-best-practices` — borrowing, clippy, errores, tests y type-state
 
 ## Licencia

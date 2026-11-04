@@ -98,7 +98,7 @@ fn finish(&mut self, cx: &mut App) {
 `SpeechSink::phrase` expects the *committed phrase* with separators; the state
 joins phrases verbatim. Add a space between sentences for Spanish/English.
 
-## When to use the built-in speech vs VoxLocal audio_engine
+## When to use the built-in speech vs LocalForge audio_engine
 
 | Requirement | Built-in Speech | audio_engine |
 | --- | --- | --- |
@@ -109,7 +109,7 @@ joins phrases verbatim. Add a space between sentences for Spanish/English.
 | 16 kHz mono pipeline | ✅ | ✅ |
 | Full control of device selection | partial | ✅ |
 
-VoxLocal v0.1 uses `audio_engine` for the conversation loop and can adopt the
+LocalForge v0.1 uses `audio_engine` for the conversation loop and can adopt the
 built-in speech later for a "dictate into the composer" button.
 
 ## Task patterns
@@ -140,7 +140,7 @@ self.request = Some(cx.spawn(async move |this, cx| {
 }));
 ```
 
-For VoxLocal, the command goes through `EngineHandle`; the task only drives the
+For LocalForge, the command goes through `EngineHandle`; the task only drives the
 polling loop. Cancel by bumping the generation and sending `Cancel`.
 
 ### Background CPU work

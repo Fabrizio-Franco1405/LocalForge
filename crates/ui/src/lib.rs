@@ -1,4 +1,4 @@
-//! VoxLocal desktop UI.
+//! LocalForge desktop UI.
 //!
 //! The crate only depends on `shared` (the UI ⇄ engine contract) and GPUI Kit.
 //! It never imports a process manager, an HTTP client or an audio backend.

@@ -1,4 +1,4 @@
-//! VoxLocal desktop shell.
+//! LocalForge desktop shell.
 //!
 //! Loads the user's configuration, starts the controller thread and opens the
 //! single GPUI window. All engine work lives behind `EngineHandle`; this file
@@ -8,7 +8,6 @@ use gpui_kit::*;
 use shared::VoxConfig;
 use tracing_subscriber::EnvFilter;
 use ui::config;
-use voxlocal::controller;
 
 fn main() {
     tracing_subscriber::fmt()
@@ -20,7 +19,7 @@ fn main() {
         .init();
 
     let config_path = VoxConfig::default_path();
-    let config = match VoxConfig::load(&config_path) {
+    let config = match VoxConfig::load_default() {
         Ok(config) => config,
         Err(error) => {
             eprintln!(
@@ -40,7 +39,7 @@ fn main() {
 
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
-                title: Some("VoxLocal".into()),
+                title: Some("LocalForge".into()),
                 ..Default::default()
             }),
             window_bounds: Some(WindowBounds::centered(size(px(1120.), px(760.)), cx)),
@@ -54,7 +53,7 @@ fn main() {
         });
 
         if let Err(error) = opened {
-            eprintln!("No se pudo abrir la ventana de VoxLocal: {error}");
+            eprintln!("No se pudo abrir la ventana de LocalForge: {error}");
             cx.quit();
         }
     });

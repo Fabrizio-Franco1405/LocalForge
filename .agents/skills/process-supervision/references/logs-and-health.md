@@ -90,17 +90,17 @@ stream in a watchdog: if no delta for 120 s, cancel and report.
 
 ## Log locations
 
-- Console: `tracing_subscriber::fmt` with `RUST_LOG=voxlocal=debug`.
-- File (M1): `data_dir()/voxlocal/logs/voxlocal.log`, 10 MB × 5.
+- Console: `tracing_subscriber::fmt` with `RUST_LOG=localforge=debug`.
+- File (M1): `data_dir()/localforge/logs/localforge.log`, 10 MB × 5.
 - Child logs: ring buffer + `tracing` target `llama` / `whisper` / `tts`.
 
 ## Useful one-liners
 
 ```bash
-RUST_LOG=voxlocal=debug,llama=debug cargo run 2>&1 | tee /tmp/voxlocal.log
+RUST_LOG=localforge=debug,llama=debug cargo run 2>&1 | tee /tmp/localforge.log
 
 # what did the engine say before dying?
-grep -E 'error|failed|Vulkan|offloaded' /tmp/voxlocal.log | tail -40
+grep -E 'error|failed|Vulkan|offloaded' /tmp/localforge.log | tail -40
 
 # who is listening?
 ss -ltnp | grep 9931

@@ -8,7 +8,7 @@ llama-server --list-devices   # ggml sees Vulkan
 whisper-cli --help            # binary runs
 ```
 
-If any of these fail, fix the environment before touching VoxLocal code.
+If any of these fail, fix the environment before touching LocalForge code.
 
 ## llama-server will not start
 

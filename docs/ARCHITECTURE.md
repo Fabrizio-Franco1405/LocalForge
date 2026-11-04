@@ -1,4 +1,4 @@
-# Arquitectura de VoxLocal
+# Arquitectura de LocalForge
 
 ## 1. Objetivo y no-objetivos
 
@@ -30,32 +30,33 @@ VAD → STT → LLM → TTS con modelos configurables, sobre GPUs sin CUDA/ROCm
 ## 3. Mapa de crates
 
 ```text
-voxlocal (src/main.rs)        shell GPUI: ventana, configuración y arranque
-voxlocal (src/lib.rs)         fachada de librería: `pub mod controller`
-├── src/controller.rs         hilo controlador: comandos, procesos, HTTP, SSE
-├── crates/ui                 vistas, ajustes, chat, herramientas (solo gpui-kit + shared)
-├── crates/shared             config, tipos, eventos, errores, texto y tools (hoja)
-├── crates/llm_engine         llama-server: spawn, health, SSE, modo externo
-├── crates/stt                whisper-cli: WAV, proceso, parser          (stub, M2)
-├── crates/tts                Kokoro ONNX: worker, limpieza de texto     (stub, M3)
-└── crates/audio_engine       cpal: captura, VAD, endpointing, playback  (stub, M2/M4)
+localforge (src/main.rs)     shell GPUI: ventana, configuración y arranque
+├── crates/controller        hilo controlador: comandos, procesos, HTTP, SSE
+├── crates/ui                vistas por secciones (solo gpui-kit + shared)
+├── crates/shared            config, eventos, texto y tools (hoja)
+├── crates/llm_engine        llama-server gestionado + modo externo
+├── crates/stt               whisper-cli                  (stub, M2)
+├── crates/tts               Kokoro ONNX                  (stub, M3)
+├── crates/audio_engine      cpal: captura/VAD/playback   (stub, M2/M4)
+└── crates/scene3d           motor 3D                     (stub, futuro)
 ```
 
-El paquete `voxlocal` es **bin + lib**: `main.rs` solo compone la ventana y
-`lib.rs` expone `controller` para que la suite aislada en `test/` pueda
+El binario `localforge` solo compone la ventana y el arranque. El controlador
+vive en `crates/controller`, así que la suite aislada de `test/` puede
 ejercitarlo sin display.
 
 ### Estado de implementación
 
 | Componente | Estado | Detalle |
 | --- | --- | --- |
-| `shared` | Implementado | Config TOML/`VOXLOCAL_*`, eventos, `for_speech`, `truncate_chars`, resolución de binarios |
+| `shared` | Implementado | Config TOML/`LOCALFORGE_*` (legado `VOXLOCAL_*`), eventos, `for_speech`, `truncate_chars`, binarios |
 | `llm_engine` | Implementado | `build_args`, spawn/kill, health, SSE, `usage`, modo `External` con `/v1/models` |
-| `ui` | Implementado | Chat, ajustes por pestañas, herramientas/diagnóstico, temas |
-| `controller` | Implementado | Comandos, generaciones, probe, historial, apagado |
+| `controller` | Implementado | Comandos, generaciones, probe, historial, diagnóstico, apagado |
+| `ui` | Implementado | Sidebar LLM/Audio/3D/General, chat, diagnóstico, ajustes por sección |
 | `stt` | Stub (M2) | Contrato documentado en `crates/stt/src/lib.rs` |
 | `tts` | Stub (M3) | Contrato documentado en `crates/tts/src/lib.rs` |
 | `audio_engine` | Stub (M2/M4) | Contrato documentado en `crates/audio_engine/src/lib.rs` |
+| `scene3d` | Stub (futuro) | Contrato documentado en `crates/scene3d/src/lib.rs` |
 
 Un stub **no simula** funcionalidad: compila, documenta su contrato y la UI lo
 muestra deshabilitado o ausente. No se aceptan implementaciones a medias que
@@ -65,12 +66,14 @@ finjan funcionar.
 
 ```text
 ui           -> gpui-kit, shared
+controller   -> shared, llm_engine, crossbeam-channel, tokio
 llm_engine   -> shared, tokio, reqwest
 stt          -> shared, tokio, hound          (cuando se implemente)
 tts          -> shared, hound                 (cuando se implemente)
 audio_engine -> shared, cpal, webrtc-vad      (cuando se implemente)
+scene3d      -> shared                        (stub)
 shared       -> serde, figment, toml, dirs, thiserror
-main/lib     -> todos
+main         -> controller, shared, ui, gpui-kit
 ```
 
 `shared` no depende de ningún otro crate del workspace. Esto evita ciclos y
@@ -125,7 +128,7 @@ sílaba y un silencio mínimo de 500–800 ms para cerrar el turno.
 | Hilo | Responsabilidad | Regla |
 | --- | --- | --- |
 | Hilo GPUI | Render, eventos de UI | Nunca bloquear con I/O o procesos |
-| `voxlocal-controller` | Comandos, procesos, HTTP | Runtime tokio multi-hilo |
+| `localforge-controller` | Comandos, procesos, HTTP | Runtime tokio multi-hilo |
 | Workers tokio | Streaming SSE, health-checks | Tareas cancelables |
 | Hilo de audio (cpal) | Callback de captura/playback | Solo copiar muestras a un canal; sin locks largos |
 | Workers de cpal | Remuestreo/mezcla | Buffers preasignados |
@@ -180,6 +183,20 @@ impl LlamaManager {
 si el runtime se desmonta de golpe. En modo `External` `start()` es un no-op y
 `probe()` es la fuente de verdad del estado.
 
+### `controller`
+
+```rust
+pub fn spawn(config: VoxConfig) -> EngineHandle;
+```
+
+- Owns the OS thread, the tokio runtime, the child processes and the HTTP clients.
+- `ReloadConfig` restarts the engine with the new values; `ProbeLlm` and
+  `ProbeTools` force a probe.
+- External mode: `ProbeLlm` reads `/v1/models`, adopts the reported model id and
+  detects a server started outside LocalForge. With an empty endpoint it
+  reports a clear error instead of probing the local port.
+- Emits only [`EngineEvent`]; the UI never calls an engine directly.
+
 ### `stt`
 
 **Estado: stub (M2).** El contrato siguiente es el objetivo, no código actual.
@@ -231,20 +248,23 @@ pub struct LinearResampler; // 48 kHz -> 16 kHz sin dependencias C
 Precedencia (mayor gana):
 
 1. Argumentos de línea de comandos (futuro).
-2. Variables de entorno `VOXLOCAL_*` (doble guion bajo para anidar:
-   `VOXLOCAL_LLM__PORT=9931`).
+2. Variables de entorno `LOCALFORGE_*` (doble guion bajo para anidar:
+   `LOCALFORGE_LLM__PORT=9931`). El prefijo antiguo `VOXLOCAL_*` se sigue
+   leyendo para no romper configuraciones existentes.
 3. `config.toml` del usuario.
 4. Valores por defecto del código.
 
 `VoxConfig::load` usa `figment` y `#[serde(default)]`, por lo que un TOML
 parcial es válido y las claves nuevas no rompen configuraciones antiguas.
+`VoxConfig::load_default` migra una vez `voxlocal/config.toml` a
+`localforge/config.toml` (deja el archivo viejo intacto).
 
 Rutas por defecto:
 
 | Recurso | Ruta |
 | --- | --- |
-| Config | `dirs::config_dir()/voxlocal/config.toml` |
-| Datos/logs | `dirs::data_dir()/voxlocal/` |
+| Config | `dirs::config_dir()/localforge/config.toml` |
+| Datos/logs | `dirs::data_dir()/localforge/` |
 | Binarios | `assets/bin/` o `PATH` |
 | Modelos | `assets/models/{llm,whisper,kokoro}` |
 
@@ -256,7 +276,7 @@ Rutas por defecto:
   notificación o en la barra de estado.
 - Los stderr de `llama-server` y `whisper-cli` se guardan en un ring buffer
   (últimas 200 líneas) para diagnosticar fallos de carga de modelo.
-- `tracing` es el logger único; `RUST_LOG=voxlocal=debug` activa detalle.
+- `tracing` es el logger único; `RUST_LOG=localforge=debug` activa detalle.
 
 ## 9. Decisiones (ADR)
 
@@ -302,6 +322,18 @@ nativo cuando `ort` y los crates Kokoro vuelvan a compilar.
 **Consecuencia:** no hay data races ni locks entre UI y motores; el coste es
 una latencia de UI acotada a 50 ms.
 
+### ADR-006 — UI por secciones y controlador como crate
+
+**Contexto:** `settings.rs` y `app.rs` superaban las 800 líneas, y el
+controlador vivía en el binario, lo que impedía probarlo desde la suite externa.
+**Decisión:** extraer `crates/controller`; dividir la UI en `app/`
+(shell, sidebar, chat, tools, status) y `settings/` (campos + una página por
+motor); sidebar con cuatro secciones aisladas (LLM, Audio, 3D, General) y el
+chat como inicio; el modo LLM decide qué campos se montan.
+**Consecuencia:** archivos pequeños, páginas independientes y un contrato
+estable para reutilizar el core. Coste: más módulos y un `Page` con estado de
+navegación.
+
 ## 10. Seguridad y privacidad
 
 - Todo el audio y los prompts se quedan en `localhost`.
@@ -320,8 +352,8 @@ una latencia de UI acotada a 50 ms.
   test, se expone una API pública mínima y documentada
   (`shared::text::truncate_chars`, `llm_engine::{take_sse_payloads, parse_delta}`,
   `ui::theme::parse_hex`).
-- Comando: `cd test && cargo test`. Cubre `shared` (23), `llm_engine` (10),
-  `ui` (7) y el controlador (2): 42 tests sin GPU, micrófono, modelos ni red
+- Comando: `cd test && cargo test`. Cubre `shared` (24), `llm_engine` (11),
+  `ui` (7) y el controlador (2): 44 tests sin GPU, micrófono, modelos ni red
   externa. El controlador se prueba contra un servidor OpenAI falso en loopback.
 - Lo que requiere hardware, modelos o latencia real es checklist manual
   (`test/docs/hardware.md`), no un test automatizado.

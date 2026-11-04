@@ -1,27 +1,25 @@
 [package]
-name = "voxlocal"
+name = "localforge"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
+description = "Harness local para conectar LLM, voz y 3D sin salir de tu máquina"
 
 [dependencies]
 gpui-kit = { workspace = true }
 shared = { workspace = true }
 ui = { workspace = true }
-llm_engine = { workspace = true }
-stt = { workspace = true }
-tts = { workspace = true }
-audio_engine = { workspace = true }
-crossbeam-channel = { workspace = true }
-tokio = { workspace = true }
+controller = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [workspace]
 resolver = "3"
 members = [
+    "crates/controller",
     "crates/llm_engine",
     "crates/audio_engine",
+    "crates/scene3d",
     "crates/stt",
     "crates/tts",
     "crates/ui",
@@ -36,6 +34,8 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 shared = { path = "crates/shared" }
 ui = { path = "crates/ui" }
+controller = { path = "crates/controller" }
+scene3d = { path = "crates/scene3d" }
 llm_engine = { path = "crates/llm_engine" }
 stt = { path = "crates/stt" }
 tts = { path = "crates/tts" }

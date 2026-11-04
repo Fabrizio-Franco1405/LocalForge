@@ -6,7 +6,7 @@
 //! blocks on process startup or model loading.
 //!
 //! The LLM state is never assumed: every change comes from an HTTP probe, so
-//! a `llama-server` started outside VoxLocal is detected and used directly.
+//! a `llama-server` started outside LocalForge is detected and used directly.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -49,7 +49,7 @@ pub fn spawn(config: VoxConfig) -> EngineHandle {
     let (handle, commands, events) = engine_channel();
 
     std::thread::Builder::new()
-        .name("voxlocal-controller".to_owned())
+        .name("localforge-controller".to_owned())
         .spawn(move || {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
@@ -99,7 +99,7 @@ impl Controller {
         self.set_state(LlmState::Stopped, "Buscando servidor…".to_owned());
 
         // Always probe first: a server started by the user must be detected
-        // even when no GGUF model is configured in VoxLocal.
+        // even when no GGUF model is configured in LocalForge.
         self.refresh(self.config.llm.auto_start).await;
 
         let mut ticker = tokio::time::interval(Duration::from_secs(3));
@@ -737,6 +737,12 @@ impl Controller {
                 format!("aún no existe: {}", data_dir.display())
             },
             ok: data_dir.exists(),
+        });
+
+        items.push(DiagnosticItem {
+            name: "Motor 3D".to_owned(),
+            value: "sin backend todavía (próximamente)".to_owned(),
+            ok: false,
         });
 
         self.emit(EngineEvent::Diagnostics { items });

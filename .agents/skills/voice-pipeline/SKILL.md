@@ -1,14 +1,14 @@
 ---
 name: voice-pipeline
 description: >
-  Use when implementing or tuning the spoken conversation loop in VoxLocal:
+  Use when implementing or tuning the spoken conversation loop in LocalForge:
   microphone capture, resampling to 16 kHz, WebRTC/Silero VAD, endpointing,
   whisper.cpp transcription, streaming LLM replies into Kokoro TTS, playback,
   barge-in, latency budgets, and echo/feedback problems.
 license: MIT
 compatibility: cpal 0.18, whisper.cpp 1.9+, Kokoro ONNX v1.0
 metadata:
-  author: voxlocal
+  author: localforge
   version: "0.1.0"
 ---
 

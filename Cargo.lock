@@ -999,6 +999,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "controller"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "llm_engine",
+ "shared",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "convert_case"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3617,6 +3628,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "localforge"
+version = "0.1.0"
+dependencies = [
+ "controller",
+ "gpui-kit",
+ "shared",
+ "tracing",
+ "tracing-subscriber",
+ "ui",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5842,6 +5865,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scene3d"
+version = "0.1.0"
+dependencies = [
+ "shared",
+]
+
+[[package]]
 name = "schannel"
 version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7287,23 +7317,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "voxlocal"
-version = "0.1.0"
-dependencies = [
- "audio_engine",
- "crossbeam-channel",
- "gpui-kit",
- "llm_engine",
- "shared",
- "stt",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "tts",
- "ui",
-]
 
 [[package]]
 name = "vswhom"

@@ -1,7 +1,7 @@
-# AGENTS.md - VoxLocal Project Context
+# AGENTS.md - LocalForge Project Context
 
 ## 1. Project Overview
-VoxLocal es un asistente de voz local y multiplataforma (Linux, Windows, macOS) construido en Rust con GPUI Kit. El objetivo es ofrecer una experiencia de conversación por voz 100% offline (VAD → STT → LLM → TTS), donde el usuario pueda configurar visualmente cada componente (rutas de modelos, puertos, argumentos de GPU, voces) y la app gestione el ciclo de vida de los procesos externos (llama-server, whisper-cli) de forma transparente.
+LocalForge es un **harness local de IA** multiplataforma (Linux, Windows, macOS) construido en Rust con GPUI Kit. Conecta motores que corren en tu máquina (LLM, voz y, próximamente, 3D) sin nube, sin PyTorch y sin CUDA. El usuario configura cada motor visualmente (rutas de binarios y modelos, puertos, argumentos de GPU, voces) y la app gestiona el ciclo de vida de los procesos externos (`llama-server`, `whisper-cli`, worker TTS) de forma transparente.
 
 ## 2. Hardware Target & Constraints (CRÍTICO)
 Este proyecto está diseñado **exclusivamente para hardware de gama media/antigua** que no tiene acceso a los ecosistemas propietarios de NVIDIA (CUDA) o al stack moderno de AMD (ROCm). El agente **NO DEBE** sugerir, instalar ni escribir código que dependa de CUDA o ROCm.
@@ -11,23 +11,28 @@ Este proyecto está diseñado **exclusivamente para hardware de gama media/antig
 - **Backend Obligatorio:** **Vulkan**. Es el único backend que funciona de forma nativa y estable en RDNA 1 sin necesidad de modificar drivers ni instalar ROCm.
 - **Regla de Oro:** Si una librería o herramienta requiere CUDA o ROCm, debe ser descartada o sustituida por una alternativa basada en Vulkan o CPU.
 
-## 3. Arquitectura: Feature Crates
-El proyecto sigue el patrón de **Feature Crates** de GPUI Kit. La raíz es un Workspace con un `main.rs` (shell) y `lib.rs` (controlador testeable) en `src/`, y los módulos de lógica en `crates/`:
-- `src/main.rs`: Shell de GPUI. Solo compone la ventana, carga configuración y arranca el controlador.
-- `src/lib.rs`: Expone `controller` para poder probarlo desde fuera del binario.
-- `src/controller.rs`: Hilo del controlador (comandos, procesos, HTTP, generaciones).
-- `crates/llm_engine`: Gestión del proceso `llama-server` (spawn, kill, health-check, `-ngl`, puerto, SSE) y modo externo.
-- `crates/audio_engine`: Captura de micrófono, VAD y reproducción de audio. **Stub (M2/M4).**
-- `crates/stt`: Wrapper para `whisper-cli`. **Stub (M2).**
-- `crates/tts`: Wrapper para `kokoro-onnx`. **Stub (M3).**
-- `crates/ui`: Componentes visuales de GPUI Kit (chat, Settings, herramientas).
-- `crates/shared`: Tipos comunes, configuración, eventos y utilidades de texto/rutas. Es hoja.
+## 3. Arquitectura: crates y módulos
+El workspace tiene un binario mínimo (`src/main.rs`) y crates con responsabilidades separadas:
 
-**Regla de oro:** La UI (`crates/ui`) no debe saber cómo se lanza `llama-server`. Solo emite eventos o llama a métodos expuestos por `crates/llm_engine`. La lógica de negocio no debe depender de GPUI.
+- `crates/controller`: hilo del controlador (comandos, procesos, HTTP, generaciones, diagnóstico). Librería pura, sin GPUI.
+- `crates/shared`: contrato UI ⇄ motores, configuración, texto y resolución de rutas. Es hoja.
+- `crates/llm_engine`: `llama-server` gestionado y modo externo OpenAI (`/v1/models`, SSE).
+- `crates/stt`: wrapper de `whisper-cli`. **Stub (M2).**
+- `crates/tts`: wrapper de Kokoro. **Stub (M3).**
+- `crates/audio_engine`: captura, VAD y playback. **Stub (M2/M4).**
+- `crates/scene3d`: motor 3D. **Stub (futuro).**
+- `crates/ui`: vista GPUI componentizada:
+  - `app/mod.rs` — shell, `Page`, pump de eventos y acciones compartidas.
+  - `app/sidebar.rs` — marca + 4 secciones + estado del motor.
+  - `app/chat.rs`, `app/tools.rs`, `app/status.rs` — conversación, diagnóstico y barra inferior.
+  - `settings/mod.rs` + `settings/{fields,llm,audio,scene3d,general}.rs` — una página por motor.
+  - `settings/llm.rs` decide los campos según `LlmMode`: Local muestra binario/GGUF/host; Externo muestra endpoint/model id/API key. Nunca ambos.
 
-Nota de estado: `llm_engine`, `shared`, `ui` y el controlador están implementados; `stt`,
-`tts` y `audio_engine` compilan como placeholders con su contrato en el docstring.
-No añadas funcionalidad simulada: implementa el crate o deja el stub honesto.
+**Regla de oro:** La UI (`crates/ui`) no debe saber cómo se lanza `llama-server`. Solo envía `EngineCommand` y pinta `EngineEvent`. La lógica de negocio no depende de GPUI.
+
+**Regla de tamaño:** ningún archivo de UI debe volver a pasar de ~500 líneas; una página o grupo de widgets por módulo.
+
+Nota de estado: `llm_engine`, `shared`, `ui`, `controller` están implementados; `stt`, `tts`, `audio_engine` y `scene3d` compilan como placeholders con su contrato en el docstring. No añadas funcionalidad simulada: implementa el crate o deja el stub honesto.
 
 ## 4. Stack Tecnológico y Documentación Oficial (Solo Vulkan)
 
@@ -80,7 +85,8 @@ No añadas funcionalidad simulada: implementa el crate o deja el stub honesto.
 
 ## 5. Configuración Segmentada
 - Las estructuras `serde` (`LlamaConfig`, `SttConfig`, `TtsConfig`, `AudioConfig`, `UiConfig`) viven en `crates/shared/src/config.rs` y se agrupan en `VoxConfig`.
-- La carga se centraliza en `shared::config` con `figment` (TOML + `VOXLOCAL_*`); no leas `std::env::var` fuera de ahí.
+- La carga se centraliza en `shared::config` con `figment` (TOML + `LOCALFORGE_*`; se acepta el prefijo antiguo `VOXLOCAL_*`); no leas `std::env::var` fuera de ahí.
+- La config vive en `dirs::config_dir()/localforge/config.toml`. Si existe la ruta antigua `voxlocal/config.toml`, `VoxConfig::load_default()` la migra una vez.
 - La UI de configuración usa el componente `Settings` de GPUI Kit y persiste con `VoxConfig::save`.
 
 ## 6. Pruebas (aisladas)
@@ -91,7 +97,7 @@ No añadas funcionalidad simulada: implementa el crate o deja el stub honesto.
   `test/tests/`.
 - Para probar lógica privada, expón una API pública pequeña y documentada (ej.
   `shared::text::truncate_chars`, `ui::theme::parse_hex`), no dejes el test dentro del crate.
-- Comando: `cd test && cargo test` (42 tests; sin GPU, micrófono, modelos ni red externa).
+- Comando: `cd test && cargo test` (44 tests; sin GPU, micrófono, modelos ni red externa).
 - Lo que requiera hardware, modelos o latencia real va a `test/docs/hardware.md` como
   checklist manual, no como test automatizado.
 

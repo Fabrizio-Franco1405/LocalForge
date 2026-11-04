@@ -1,0 +1,423 @@
+//! Conversation page: banner, messages, composer and context meter.
+
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::input::Input;
+use gpui_kit::component::{ActiveTheme as _, StyledExt as _};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
+use shared::{LlmState, TtsBackend};
+
+use crate::app::{Page, VoxApp};
+use crate::chat::render_bubble;
+use crate::config;
+
+impl VoxApp {
+    fn empty_state(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let cfg = config::current(cx);
+
+        let (llm_color, llm_value) = match self.llm {
+            LlmState::Ready => (theme.success, "conectado"),
+            LlmState::Starting => (theme.warning, "cargando"),
+            LlmState::Error => (theme.danger, "error"),
+            LlmState::Stopped => (theme.muted_foreground, "detenido"),
+        };
+
+        let stt_value = if cfg.stt.enabled {
+            "activado"
+        } else {
+            "opcional"
+        };
+        let stt_color = if cfg.stt.enabled {
+            theme.success
+        } else {
+            theme.muted_foreground
+        };
+
+        let tts_value = match cfg.tts.backend {
+            TtsBackend::Disabled => "opcional",
+            _ => "conectado",
+        };
+        let tts_color = if cfg.tts.backend == TtsBackend::Disabled {
+            theme.muted_foreground
+        } else {
+            theme.success
+        };
+
+        div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_5()
+            .px_6()
+            .py_10()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_5()
+                    .max_w(px(820.))
+                    .w_full()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(theme.primary.opacity(0.28))
+                    .bg(theme.group_box)
+                    .p_8()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_full()
+                                    .bg(theme.primary.opacity(0.14))
+                                    .text_xs()
+                                    .font_semibold()
+                                    .text_color(theme.primary)
+                                    .child("100% LOCAL · BYO ENGINES"),
+                            )
+                            .child(
+                                div()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_full()
+                                    .bg(theme.muted)
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child("Vulkan · sin CUDA / ROCm"),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_2xl()
+                                    .font_semibold()
+                                    .text_color(theme.foreground)
+                                    .child("Tu LLM, tu voz, tu 3D. En tu máquina."),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(theme.muted_foreground)
+                                    .child(
+                                        "LocalForge no descarga ni instala nada: conecta tu llama.cpp, tu whisper.cpp \
+                                         y tu TTS, y añade motores nuevos sin cambiar la app.",
+                                    ),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap_2()
+                            .child(status_chip("LLM", llm_value, llm_color, cx))
+                            .child(status_chip("STT", stt_value, stt_color, cx))
+                            .child(status_chip("TTS", tts_value, tts_color, cx))
+                            .child(status_chip("3D", "próximamente", theme.muted_foreground, cx))
+                            .child(status_chip("Backend", "Vulkan", theme.success, cx)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                Button::new("hero-settings")
+                                    .primary()
+                                    .label("Configurar motor")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.page = Page::Llm;
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                Button::new("hero-probe")
+                                    .ghost()
+                                    .label("Comprobar conexión")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.probe_connection(cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new("hero-tools")
+                                    .ghost()
+                                    .label("Ver herramientas")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.page = Page::Tools;
+                                        this.probe(cx);
+                                    })),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_3()
+                    .max_w(px(820.))
+                    .w_full()
+                    .child(feature_card(
+                        "1",
+                        "Conecta",
+                        "Local abre tu llama.cpp y tu GGUF; Externo se conecta a Ollama, LM Studio o un llama-server ya encendido. Cada modo muestra solo sus campos.",
+                        cx,
+                    ))
+                    .child(feature_card(
+                        "2",
+                        "Comprueba",
+                        "Aplicar y Reiniciar vuelven a leer la configuración y a probar el puerto. Herramientas muestra qué rutas ve y qué falta.",
+                        cx,
+                    ))
+                    .child(feature_card(
+                        "3",
+                        "Conversa",
+                        "El chat funciona sin STT ni TTS. Cuando conectes Whisper y tu motor de voz, el mismo flujo se vuelve manos libres. El motor 3D llegará con su propia sección.",
+                        cx,
+                    )),
+            )
+    }
+
+    fn message_list(&self, cx: &App) -> impl IntoElement {
+        div().flex().flex_col().gap_3().p_4().children(
+            self.log
+                .bubbles()
+                .iter()
+                .map(|bubble| render_bubble(bubble, cx)),
+        )
+    }
+
+    fn composer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let stt_enabled = config::current(cx).stt.enabled;
+
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .px_4()
+            .py_3()
+            .border_t_1()
+            .border_color(theme.border)
+            .bg(theme.group_box)
+            .child(
+                div()
+                    .flex()
+                    .items_end()
+                    .gap_2()
+                    .child(div().flex_1().child(Input::new(&self.draft)))
+                    .when(self.streaming.is_none(), |this| {
+                        this.child(Button::new("send").primary().label("Enviar").on_click(
+                            cx.listener(|this, _, window, cx| {
+                                let text = this.draft.read(cx).value().to_string();
+                                this.submit(&text, window, cx);
+                            }),
+                        ))
+                    })
+                    .when(self.streaming.is_some(), |this| {
+                        this.child(
+                            Button::new("stop")
+                                .danger()
+                                .label("Detener")
+                                .on_click(cx.listener(|this, _, _, cx| this.cancel(cx))),
+                        )
+                    })
+                    .when(stt_enabled, |this| {
+                        this.child(
+                            Button::new("mic")
+                                .ghost()
+                                .label(if self.listening {
+                                    "Detener micrófono"
+                                } else {
+                                    "Dictar"
+                                })
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.toggle_listening(window, cx);
+                                })),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(
+                        // AQUÍ AGRUPAMOS EL TEXTO Y EL CONTADOR DE CONTEXTO
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_4()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child("Enter envía · una línea por mensaje"),
+                            )
+                            // --- BARRA DE CONTEXTO ---
+                            .when(self.context_total > 0, |this| {
+                                this.child(Self::render_context_bar(
+                                    self.context_used,
+                                    self.context_total,
+                                    cx,
+                                ))
+                            }),
+                    )
+                    .when(self.listening, |this| {
+                        this.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(theme.muted_foreground)
+                                        .child("Nivel"),
+                                )
+                                .child(
+                                    div()
+                                        .w(px(120. * self.level.clamp(0.0, 1.0)))
+                                        .h(px(4.))
+                                        .rounded_full()
+                                        .bg(theme.success),
+                                ),
+                        )
+                    })
+                    .when_some(self.notice.clone(), |this, notice| {
+                        this.child(div().text_xs().text_color(theme.danger).child(notice))
+                    }),
+            )
+    }
+
+    pub(super) fn chat_page(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .child(
+                div()
+                    .id("chat-scroll")
+                    .flex_1()
+                    .min_h(px(0.))
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .when(self.log.is_empty(), |this| this.child(self.empty_state(cx)))
+                    .when(!self.log.is_empty(), |this| {
+                        this.child(self.message_list(cx))
+                    }),
+            )
+            .child(self.composer(cx))
+    }
+    /// Dibuja el indicador de contexto.
+    pub fn render_context_bar(used: u32, total: u32, cx: &App) -> impl IntoElement {
+        let theme = cx.theme();
+        let is_high = used as f32 / total as f32 > 0.8; // Si pasa del 80%, se pone rojo
+        let text_color = if is_high {
+            theme.danger
+        } else {
+            theme.muted_foreground
+        };
+
+        div().flex().items_center().gap_2().child(
+            div()
+                .text_xs()
+                .text_color(text_color)
+                .child(format!("Memoria: {} / {} tokens", used, total)),
+        )
+    }
+}
+
+fn status_chip(
+    label: &'static str,
+    value: &'static str,
+    color: Hsla,
+    cx: &App,
+) -> impl IntoElement {
+    let theme = cx.theme();
+
+    div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .px_2()
+        .py_1()
+        .rounded_full()
+        .bg(color.opacity(0.12))
+        .child(div().w(px(6.)).h(px(6.)).rounded_full().bg(color))
+        .child(
+            div()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(format!("{label}:")),
+        )
+        .child(
+            div()
+                .text_xs()
+                .font_semibold()
+                .text_color(theme.foreground)
+                .child(value),
+        )
+}
+fn feature_card(
+    number: &'static str,
+    title: &'static str,
+    body: &'static str,
+    cx: &App,
+) -> impl IntoElement {
+    let theme = cx.theme();
+
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .flex_1()
+        .min_w(px(210.))
+        .rounded_md()
+        .border_1()
+        .border_color(theme.border)
+        .bg(theme.group_box)
+        .p_4()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .w(px(22.))
+                        .h(px(22.))
+                        .rounded_full()
+                        .bg(theme.primary)
+                        .text_color(theme.primary_foreground)
+                        .text_xs()
+                        .font_semibold()
+                        .child(number),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .text_color(theme.foreground)
+                        .child(title),
+                ),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(body),
+        )
+}

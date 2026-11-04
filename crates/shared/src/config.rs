@@ -1,12 +1,13 @@
-//! Configuration model for VoxLocal.
+//! Configuration model for LocalForge.
 //!
 //! Every section has sensible defaults and is optional in the TOML file, so a
 //! partial configuration keeps working across releases. Environment variables
-//! use the `VOXLOCAL_` prefix and `__` as the nesting separator:
+//! use the `LOCALFORGE_` prefix and `__` as the nesting separator. The legacy
+//! `VOXLOCAL_` prefix is still read so an existing setup keeps working:
 //!
 //! ```text
-//! VOXLOCAL_LLM__PORT=9940
-//! VOXLOCAL_AUDIO__VAD__MIN_SILENCE_MS=800
+//! LOCALFORGE_LLM__PORT=9940
+//! LOCALFORGE_AUDIO__VAD__MIN_SILENCE_MS=800
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -28,6 +29,8 @@ pub struct VoxConfig {
     pub audio: AudioConfig,
     /// Desktop user interface.
     pub ui: UiConfig,
+    /// Local 3D generation engine (placeholder).
+    pub scene3d: Scene3dConfig,
     /// Filesystem locations.
     pub paths: PathsConfig,
 }
@@ -43,9 +46,31 @@ impl VoxConfig {
 
         figment::Figment::new()
             .merge(figment::providers::Toml::file(path))
+            // Legacy prefix first, so `LOCALFORGE_*` wins when both are set.
             .merge(figment::providers::Env::prefixed("VOXLOCAL_").split("__"))
+            .merge(figment::providers::Env::prefixed("LOCALFORGE_").split("__"))
             .extract()
             .map_err(|error| ConfigError::Invalid(Box::new(error)))
+    }
+
+    /// Loads the default configuration, migrating a legacy LocalForge file once.
+    ///
+    /// If `localforge/config.toml` does not exist but `voxlocal/config.toml`
+    /// does, the old file is read and written to the new location. The legacy
+    /// file is left untouched, so a rollback keeps working.
+    pub fn load_default() -> Result<Self, ConfigError> {
+        let path = Self::default_path();
+
+        if !path.exists() {
+            let legacy = Self::legacy_path();
+            if legacy.exists() {
+                let config = Self::load(&legacy)?;
+                let _ = config.save(&path);
+                return Ok(config);
+            }
+        }
+
+        Self::load(&path)
     }
 
     /// Saves the configuration as pretty TOML, creating parent directories.
@@ -70,6 +95,16 @@ impl VoxConfig {
     pub fn default_path() -> PathBuf {
         dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
+            .join("localforge")
+            .join("config.toml")
+    }
+
+    /// Configuration path used by the previous name (LocalForge).
+    ///
+    /// Read-only: [`Self::load_default`] copies it to [`Self::default_path`].
+    pub fn legacy_path() -> PathBuf {
+        dirs::config_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
             .join("voxlocal")
             .join("config.toml")
     }
@@ -79,7 +114,7 @@ impl VoxConfig {
         self.paths.data_dir.clone().unwrap_or_else(|| {
             dirs::data_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join("voxlocal")
+                .join("localforge")
         })
     }
 
@@ -96,7 +131,7 @@ impl VoxConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LlmMode {
-    /// VoxLocal spawns and supervises `llama-server`.
+    /// LocalForge spawns and supervises `llama-server`.
     #[default]
     Managed,
     /// The user provides an OpenAI-compatible server (Ollama, LM Studio,
@@ -231,7 +266,7 @@ impl LlmConfig {
         }
     }
 
-    /// Whether VoxLocal owns the process.
+    /// Whether LocalForge owns the process.
     pub fn is_managed(&self) -> bool {
         self.mode == LlmMode::Managed
     }
@@ -425,6 +460,40 @@ impl UiConfig {
             "rose" => "#f43f5e".to_owned(),
             "custom" => self.accent_custom.clone(), // Si es custom, usa el campo de texto
             _ => "#7c5cff".to_owned(),              // Por defecto, violeta
+        }
+    }
+}
+
+/// Local 3D generation engine (placeholder).
+///
+/// The config exists from day one so the UI can show the section, but no
+/// backend implements it yet. `backend = "disabled"` is the honest default.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Scene3dConfig {
+    /// Whether the 3D engine is enabled.
+    pub enabled: bool,
+    /// Backend id (`disabled`, `comfyui`, `command`).
+    pub backend: String,
+    /// Endpoint for HTTP-based backends.
+    pub endpoint: String,
+    /// Command template for CLI backends.
+    pub command: String,
+    /// Directory containing checkpoints and meshes.
+    pub model_dir: Option<PathBuf>,
+    /// Extra raw arguments.
+    pub extra_args: Vec<String>,
+}
+
+impl Default for Scene3dConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            backend: "disabled".to_owned(),
+            endpoint: String::new(),
+            command: String::new(),
+            model_dir: None,
+            extra_args: Vec::new(),
         }
     }
 }

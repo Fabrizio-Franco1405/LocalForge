@@ -1,14 +1,14 @@
 ---
 name: gpui-kit-desktop
 description: >
-  Use when building or changing VoxLocal's desktop UI with GPUI Kit 0.9:
+  Use when building or changing LocalForge's desktop UI with GPUI Kit 0.9:
   creating Views/Entities, wiring render and cx.listener, using the Settings
   component for config pages, InputState, tasks, Globals, themes, notifications,
   or writing UI integration tests. Includes GPUI 0.9 API pitfalls.
 license: MIT
 compatibility: GPUI Kit 0.9, Rust 1.92+, GPUI (Zed)
 metadata:
-  author: voxlocal
+  author: localforge
   version: "0.1.0"
 ---
 
@@ -115,7 +115,7 @@ impl VoxApp {
 - Dropping a `Task` cancels it. Replace the field to restart.
 - Do not block the foreground executor with `std::thread::sleep`, blocking I/O,
   or `Runtime::block_on`.
-- For cross-thread work use channels (VoxLocal's `EngineHandle`) and poll with a
+- For cross-thread work use channels (LocalForge's `EngineHandle`) and poll with a
   timer; this avoids mixing tokio's reactor with GPUI's executor.
 
 ## Settings component (config UI)
@@ -178,7 +178,7 @@ cx.subscribe_in(&input, window, |this, state, event, window, cx| {
 - Keep the `Subscription` in the view; otherwise the handler is dropped.
 - `Input::new(&state)` renders; suffix/prefix accept any element.
 
-## Components used by VoxLocal
+## Components used by LocalForge
 
 - `Button` / `ButtonVariants`: `.primary()`, `.ghost()`, `.outline()`,
   `.label()`, `.icon(IconName::...)`, `.small()`.
@@ -201,7 +201,7 @@ GPUI Kit 0.9 has a `speech` feature with `SpeechState`, `SpeechButton`,
   `SpeechRecognizer` (e.g., whisper.cpp).
 - The state expects 16 kHz mono i16 in `push_audio`; `finish` commits the
   transcript.
-- VoxLocal v0.1 uses its own `audio_engine` for VAD/barge-in, so the speech
+- LocalForge v0.1 uses its own `audio_engine` for VAD/barge-in, so the speech
   feature is not enabled by default. It is a good shortcut for a push-to-talk
   dictation field later.
 
@@ -243,7 +243,7 @@ mod tests {
 ## Verification
 
 ```bash
-cargo run -p voxlocal            # the actual app
+cargo run -p localforge            # the actual app
 cargo clippy -p ui -- -D warnings
 ```
 
@@ -255,7 +255,7 @@ cargo clippy -p ui -- -D warnings
 ## References
 
 - [`references/settings-and-input.md`](references/settings-and-input.md) —
-  complete settings/input recipes for VoxLocal's config.
+  complete settings/input recipes for LocalForge's config.
 - [`references/speech-and-tasks.md`](references/speech-and-tasks.md) — speech
   recognizer seam and task/async patterns.
 - `https://gpui-kit.com/llms-full.txt` — authoritative API text (4.6 MB).

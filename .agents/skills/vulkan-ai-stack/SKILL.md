@@ -2,14 +2,14 @@
 name: vulkan-ai-stack
 description: >
   Use when building, configuring, debugging, or choosing local inference
-  backends for VoxLocal: llama.cpp/llama-server, whisper.cpp/whisper-cli,
+  backends for LocalForge: llama.cpp/llama-server, whisper.cpp/whisper-cli,
   Vulkan on RDNA 1 (RX 5700 XT), VRAM budgeting for 8 GB, model selection, or
   diagnosing "runs on CPU", OOM, and driver problems. Enforces the no-CUDA /
   no-ROCm / no-PyTorch constraint.
 license: MIT
 compatibility: Linux (Mesa RADV), Windows (AMD/NVIDIA/Intel Vulkan), macOS via MoltenVK
 metadata:
-  author: voxlocal
+  author: localforge
   version: "0.1.0"
 ---
 
@@ -80,9 +80,9 @@ toolchain for GPUI Kit either.
 
 Vulkan is provided by MoltenVK; ggml Vulkan works but is slower than Metal.
 For macOS, building llama.cpp with Metal is acceptable (it is not CUDA/ROCm),
-but VoxLocal's supported default remains Vulkan.
+but LocalForge's supported default remains Vulkan.
 
-## Serving flags used by VoxLocal
+## Serving flags used by LocalForge
 
 ```text
 --model <gguf>          -m
@@ -160,7 +160,7 @@ budget = 8192 MiB
 ## References
 
 - [`references/llama-server.md`](references/llama-server.md) — full flag and
-  API reference for the version targeted by VoxLocal.
+  API reference for the version targeted by LocalForge.
 - [`references/vram-and-models.md`](references/vram-and-models.md) — sizing
   tables and measured expectations.
 - [`references/troubleshooting.md`](references/troubleshooting.md) — step-by-step

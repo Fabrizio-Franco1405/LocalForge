@@ -1,18 +1,18 @@
 ---
-name: voxlocal-workflow
+name: localforge-workflow
 description: >
-  Use for day-to-day work on VoxLocal: build/run/test commands, adding a
+  Use for day-to-day work on LocalForge: build/run/test commands, adding a
   workspace crate or dependency, model and binary layout, environment setup,
   formatting/linting gates, CI expectations, release packaging, and
   troubleshooting the development environment (ALSA, Vulkan, GPUI, Rust 2024).
 license: MIT
 compatibility: Rust 1.92+, Cargo, Linux/Windows/macOS
 metadata:
-  author: voxlocal
+  author: localforge
   version: "0.1.0"
 ---
 
-# VoxLocal development workflow
+# LocalForge development workflow
 
 ## Commands
 
@@ -36,16 +36,16 @@ cd test && cargo test            # suite aislada (fuera del workspace y de git)
 .
 ├── Cargo.toml              workspace + app package
 ├── src/
-│   ├── main.rs             GPUI bootstrap (window only)
-│   ├── lib.rs              exposes `controller` for the external suite
-│   └── controller.rs       command loop + tokio runtime
+│   └── main.rs             GPUI bootstrap (window only)
 ├── crates/
+│   ├── controller/         command loop + tokio runtime
 │   ├── shared/             config, events, text, tools
 │   ├── llm_engine/         llama-server (managed + external)
 │   ├── stt/                whisper-cli            (stub, M2)
 │   ├── tts/                Kokoro worker          (stub, M3)
 │   ├── audio_engine/       cpal + VAD             (stub, M2/M4)
-│   └── ui/                 GPUI views
+│   ├── scene3d/            local 3D engine        (stub)
+│   └── ui/                 app/ + settings/ modules
 ├── assets/
 │   ├── bin/                local binaries         (ignored)
 │   └── models/             model files            (ignored)

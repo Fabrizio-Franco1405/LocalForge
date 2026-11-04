@@ -1,9 +1,20 @@
 # Crate contracts
 
-> **Estado (actualizado):** `shared`, `llm_engine`, `ui` y el controlador están
-> implementados. `stt`, `tts` y `audio_engine` son stubs (M2/M3/M4): sus
+> **Estado (actualizado):** `shared`, `llm_engine`, `ui` y `controller` están
+> implementados. `stt`, `tts`, `audio_engine` y `scene3d` son stubs: sus
 > secciones describen el contrato objetivo, no código existente. La suite de
 > pruebas vive en `test/` (ignorada por git) y usa solo API pública.
+
+## `controller`
+
+```rust
+pub fn spawn(config: VoxConfig) -> EngineHandle;
+```
+
+- Owns the dedicated thread, tokio runtime, child processes and HTTP clients.
+- `ReloadConfig` restarts with new values; `ProbeLlm`/`ProbeTools` force a probe.
+- External mode reads `/v1/models` and adopts the reported model id.
+- Emits `EngineEvent` only; the UI never calls it directly.
 
 ## `shared`
 
@@ -122,6 +133,15 @@ pub enum EndpointEvent {
 - cpal `Stream` handles stay in the returned guard. Dropping the guard stops
   the stream.
 
+## `scene3d`
+
+```rust
+// Stub: no public API yet.
+```
+
+Reserved for local scene/mesh generation; `Scene3dConfig` already exists in
+`shared` with `enabled = false`.
+
 ## `ui`
 
 ```rust
@@ -131,6 +151,8 @@ impl VoxApp {
 }
 ```
 
+- Modular: `app/` (shell, sidebar, chat, tools, status) and `settings/`
+  (fields, llm, audio, scene3d, general).
 - Reads config from the `GlobalConfig` global (set by `main`).
 - Polls `EngineHandle` every 50 ms in a `Task<()>` stored in the view.
 - Never imports engine crates.

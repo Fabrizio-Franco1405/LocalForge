@@ -1,4 +1,4 @@
-# Settings and input recipes for VoxLocal
+# Settings and input recipes for LocalForge
 
 ## Global config
 
@@ -37,7 +37,7 @@ use gpui_kit::component::setting::{
 fn settings_view(cx: &mut App) -> impl IntoElement {
     let cfg = |cx: &App| cx.global::<GlobalConfig>().0.clone();
 
-    Settings::new("voxlocal-settings")
+    Settings::new("localforge-settings")
         .pages(vec![
             SettingPage::new("Modelo")
                 .default_open(true)
@@ -157,7 +157,7 @@ fn settings_view(cx: &mut App) -> impl IntoElement {
 ## Rendering the settings page
 
 `Settings` is a `RenderOnce` element. Store per-page selection inside it via
-the stable id `"voxlocal-settings"`:
+the stable id `"localforge-settings"`:
 
 ```rust
 impl Render for VoxApp {
@@ -167,7 +167,8 @@ impl Render for VoxApp {
             .p_4()
             .child(match self.page {
                 Page::Chat => self.chat(cx).into_any_element(),
-                Page::Settings => settings_view(cx).into_any_element(),
+                Page::Llm => settings::view(cx, Page::Llm).into_any_element(),
+                Page::Audio => settings::view(cx, Page::Audio).into_any_element(),
             })
     }
 }

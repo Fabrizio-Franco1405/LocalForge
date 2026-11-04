@@ -1,19 +1,19 @@
 ---
-name: voxlocal-architecture
+name: localforge-architecture
 description: >
-  Use when adding or changing a feature in VoxLocal, deciding which crate owns
+  Use when adding or changing a feature in LocalForge, deciding which crate owns
   a piece of logic, wiring the GPUI UI to an engine, adding a configuration
   field, defining a new EngineCommand/EngineEvent, or reviewing architecture
-  boundaries. Covers the 6-crate workspace, threading model, error strategy,
+  boundaries. Covers the 8-crate workspace, threading model, error strategy,
   and the UI/engine contract.
 license: MIT
 compatibility: Rust 1.92+, Cargo, GPUI Kit 0.9
 metadata:
-  author: voxlocal
+  author: localforge
   version: "0.1.0"
 ---
 
-# VoxLocal Architecture
+# LocalForge Architecture
 
 ## When to use this skill
 
@@ -44,20 +44,22 @@ Related skills: `gpui-kit-desktop` (views), `vulkan-ai-stack` (inference),
 | Crate | Owns | Must not own |
 | --- | --- | --- |
 | `shared` | config schema, commands/events, `EngineHandle`, text cleanup, common errors | processes, HTTP, cpal |
+| `controller` | command loop, tokio runtime, process/HTTP ownership, generations, diagnostics | GPUI, rendering |
 | `llm_engine` | `llama-server` lifecycle, health, SSE parsing, chat history transport | UI state, TTS |
 | `stt` | WAV encoding, `whisper-cli` invocation, transcript parsing | microphone, VAD |
 | `tts` | Kokoro worker invocation, WAV decode, text-to-speech contract | playback device |
 | `audio_engine` | cpal capture/playback, resampling, VAD, endpointing | transcript text, LLM |
-| `ui` | windows, views, settings form, chat rendering, notifications | any engine internals |
-| root `src/` | composition: config load, controller thread, window creation | feature logic |
+| `scene3d` | local 3D engine (stub): contract for scene/mesh generation | LLM, TTS |
+| `ui` | windows, sidebar, per-motor settings pages, chat rendering, notifications | any engine internals |
+| root `src/` | composition: config load, window creation, controller spawn | feature logic |
 
 Dependency direction:
 
 ```
-ui ──► shared ◄── llm_engine
- │                 stt
- │                 tts
- └─── main ──────► audio_engine
+ui ──► shared ◄── llm_engine ◄── controller
+ │                 stt              ▲
+ │                 tts              │
+ └─── main ──────► audio_engine     └── scene3d (stub)
 ```
 
 ## The UI ⇄ engine contract
@@ -97,7 +99,7 @@ Rules:
 - Commands own their payload (`String`, `Arc<[f32]>`), never a reference into
   UI state.
 - `EngineEvent` is `Clone + Send + 'static`; never put GPUI types in it.
-- Adding a command requires: handler in `src/controller.rs`, match arm in
+- Adding a command requires: handler in `crates/controller/src/lib.rs`, match arm in
   `ui`, and a test for the pure part if any.
 
 ## Threading model
@@ -125,7 +127,7 @@ GPUI main thread ──(crossbeam Sender<EngineCommand>)──► controller thr
 2. **Implement the engine method** in its crate, with a pure helper for the
    testable part (argument builder, parser, state machine).
 3. **Add a unit test** for the pure helper. `cargo test -p <crate>`.
-4. **Handle the command** in `src/controller.rs`. Emit progress and terminal
+4. **Handle the command** in `crates/controller/src/lib.rs`. Emit progress and terminal
    events. On error, emit `EngineEvent::Error` and reset state.
 5. **Render the state in the UI** from `EngineEvent`s; do not call the engine
    directly.
