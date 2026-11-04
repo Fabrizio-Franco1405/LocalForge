@@ -19,13 +19,14 @@ metadata:
 ```bash
 cargo build                      # workspace
 cargo run                        # app (GPUI window)
-cargo test --workspace           # unit tests
 cargo fmt --all                  # format
 cargo clippy --all-targets --all-features -- -D warnings
+cd test && cargo test            # suite aislada (fuera del workspace y de git)
 ```
 
 - Always `cargo fmt` before finishing a task.
 - `clippy -D warnings` is a gate, not a suggestion.
+- Tests live in `test/`, never as `#[cfg(test)]` inside `src/` or `crates/`.
 - Tests must not require a GPU, microphone, model files, or network.
 - Use `--release` for any latency measurement.
 
@@ -35,23 +36,25 @@ cargo clippy --all-targets --all-features -- -D warnings
 .
 ├── Cargo.toml              workspace + app package
 ├── src/
-│   ├── main.rs             GPUI bootstrap
+│   ├── main.rs             GPUI bootstrap (window only)
+│   ├── lib.rs              exposes `controller` for the external suite
 │   └── controller.rs       command loop + tokio runtime
 ├── crates/
-│   ├── shared/             config, events, text
-│   ├── llm_engine/         llama-server
-│   ├── stt/                whisper-cli
-│   ├── tts/                Kokoro worker
-│   ├── audio_engine/       cpal + VAD
+│   ├── shared/             config, events, text, tools
+│   ├── llm_engine/         llama-server (managed + external)
+│   ├── stt/                whisper-cli            (stub, M2)
+│   ├── tts/                Kokoro worker          (stub, M3)
+│   ├── audio_engine/       cpal + VAD             (stub, M2/M4)
 │   └── ui/                 GPUI views
 ├── assets/
-│   ├── bin/                optional local binaries
-│   ├── models/             ignored model files
-│   └── scripts/
-├── tools/
-│   ├── kokoro_worker.py
-│   └── setup_kokoro.sh
+│   ├── bin/                local binaries         (ignored)
+│   └── models/             model files            (ignored)
 ├── docs/
+├── test/                   isolated suite         (ignored, own workspace)
+│   ├── Cargo.toml
+│   ├── tests/
+│   └── docs/
+├── tools/                  Kokoro worker/scripts  (planned, M3)
 └── .agents/skills/
 ```
 
@@ -62,7 +65,8 @@ cargo clippy --all-targets --all-features -- -D warnings
 2. Add to `members` and `[workspace.dependencies]` in the root manifest.
 3. Use `foo = { workspace = true }` from consumers.
 4. Keep the dependency direction: `foo -> shared` only (unless it is `main`).
-5. Add a `#![doc = "..."]` module doc and at least one unit test.
+5. Add a `#![doc = "..."]` module doc and its tests in `test/tests/`, not in the
+   crate.
 
 ## Adding a dependency
 
@@ -113,7 +117,8 @@ sudo apt install -y gcc g++ clang libfontconfig-dev libwayland-dev \
 - One logical change per commit; imperative subject (`stt: parse plain output`).
 - Update docs/skills when a public contract changes.
 - Include the commands you ran in the PR description.
-- Never commit models, `.venv-kokoro/`, logs, or `target/`.
+- Never commit models, `.venv-kokoro/`, logs, `target/` or `test/` (the test
+  suite is local by design).
 - Generated code goes in `target/` or is checked in with a header saying how
   to regenerate it.
 
@@ -122,9 +127,13 @@ sudo apt install -y gcc g++ clang libfontconfig-dev libwayland-dev \
 ```yaml
 - cargo fmt --all -- --check
 - cargo clippy --all-targets --all-features -- -D warnings
-- cargo test --workspace
 - cargo build --release   # Linux
 ```
+
+`cargo test --workspace` runs no tests: the suite lives in the ignored `test/`
+crate. Run it locally with `cd test && cargo test`. If CI ever needs tests,
+version a mirror of that crate or rebuild it in the workflow — do not silently
+assume the gate is covered.
 
 Add a smoke job that runs `llama-server --list-devices` and asserts the output
 contains `Vulkan0` on a self-hosted GPU runner (optional, not on public CI).
@@ -132,7 +141,8 @@ contains `Vulkan0` on a self-hosted GPU runner (optional, not on public CI).
 ## Release
 
 - Build on each target OS; do not cross-compile GPUI.
-- Bundle: binary, `tools/kokoro_worker.py`, default config template, licenses.
+- Bundle: binary, `tools/kokoro_worker.py` (once M3 exists), default config
+  template, licenses.
 - Do not bundle models by default; offer a first-run downloader with SHA-256.
 - Linux: `.deb`/AppImage + desktop entry; Windows: ZIP/Inno Setup; macOS:
   `.app` in a DMG with microphone usage strings.
@@ -152,7 +162,7 @@ contains `Vulkan0` on a self-hosted GPU runner (optional, not on public CI).
 
 ## Definition of done
 
-- [ ] `cargo fmt`, `clippy -D warnings`, `test` green.
+- [ ] `cargo fmt`, `clippy -D warnings` and `cd test && cargo test` green.
 - [ ] No new CUDA/ROCm/PyTorch dependency.
 - [ ] Config change is backward compatible.
 - [ ] Error path leaves the app usable.

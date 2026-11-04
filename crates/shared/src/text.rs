@@ -120,6 +120,20 @@ fn is_emoji(ch: char) -> bool {
     )
 }
 
+/// Shortens `input` to at most `max` characters, appending `…` when cut.
+///
+/// Counts `char`s (not bytes), so the result is always valid UTF-8 and never
+/// splits a multi-byte character. Used for diagnostics and error details.
+pub fn truncate_chars(input: &str, max: usize) -> String {
+    if input.chars().count() <= max {
+        return input.to_owned();
+    }
+
+    let mut truncated: String = input.chars().take(max).collect();
+    truncated.push('…');
+    truncated
+}
+
 fn collapse_whitespace(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut pending_space = false;
@@ -137,61 +151,4 @@ fn collapse_whitespace(input: &str) -> String {
     }
 
     out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn removes_code_fences_but_keeps_prose() {
-        let input = "Aquí tienes:\n```rust\nfn main() {}\n```\nEspero que ayude.";
-        assert_eq!(for_speech(input), "Aquí tienes: Espero que ayude.");
-    }
-
-    #[test]
-    fn keeps_inline_code_content_without_backticks() {
-        assert_eq!(
-            for_speech("Usa `llama-server --port 9931` para empezar."),
-            "Usa llama-server --port 9931 para empezar."
-        );
-    }
-
-    #[test]
-    fn converts_links_to_their_text() {
-        assert_eq!(
-            for_speech("Mira [la documentación](https://example.com) ahora."),
-            "Mira la documentación ahora."
-        );
-    }
-
-    #[test]
-    fn strips_list_markers_and_headers() {
-        let input = "## Pasos\n1. Abre la app\n- Pulsa iniciar\n* Listo";
-        assert_eq!(for_speech(input), "Pasos Abre la app Pulsa iniciar Listo");
-    }
-
-    #[test]
-    fn removes_emojis_and_zwj_sequences() {
-        assert_eq!(for_speech("Hola 👋🏽 mundo 🚀!"), "Hola mundo !");
-        assert_eq!(for_speech("Familia 👨‍👩‍👧 lista"), "Familia lista");
-    }
-
-    #[test]
-    fn preserves_spanish_accents_and_punctuation() {
-        assert_eq!(
-            for_speech("¿Qué tal? ¡Muy bien! Añadí código, ¿eh?"),
-            "¿Qué tal? ¡Muy bien! Añadí código, ¿eh?"
-        );
-    }
-
-    #[test]
-    fn collapses_whitespace() {
-        assert_eq!(for_speech("  uno \n\n dos\t tres  "), "uno dos tres");
-    }
-
-    #[test]
-    fn empty_input_stays_empty() {
-        assert_eq!(for_speech("   \n\n "), "");
-    }
 }

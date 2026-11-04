@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use llm_engine::{ChatDelta, ChatMessage, LlamaManager, ServerProbe};
+use shared::text::truncate_chars;
 use shared::{
     DiagnosticItem, EngineCommand, EngineEvent, EngineHandle, LlmMode, LlmState, TtsBackend,
     VoxConfig, engine_channel,
@@ -345,7 +346,7 @@ impl Controller {
         {
             let message = format!(
                 "llama-server terminó (código {code:?}). {}",
-                truncate(&logs, 400)
+                truncate_chars(&logs, 400)
             );
             self.emit_error("llm", message.clone());
             self.set_state(LlmState::Error, message);
@@ -742,15 +743,6 @@ impl Controller {
     }
 }
 
-fn truncate(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        return text.to_owned();
-    }
-    let mut truncated: String = text.chars().take(max).collect();
-    truncated.push('…');
-    truncated
-}
-
 fn binary_item(name: &str, binary: &std::path::Path) -> DiagnosticItem {
     match shared::tools::resolve_binary(binary) {
         Some(path) => DiagnosticItem {
@@ -775,245 +767,5 @@ async fn next_command(receiver: Arc<Receiver<EngineCommand>>) -> Option<EngineCo
             }
             Err(TryRecvError::Disconnected) => return None,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::{Read, Write};
-    use std::net::{TcpListener, TcpStream};
-    use std::sync::Mutex;
-    use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
-    use std::time::Instant;
-
-    /// Minimal OpenAI-compatible server used by the controller tests.
-    struct MockServer {
-        port: u16,
-        stop: Arc<AtomicBool>,
-        last_body: Arc<Mutex<String>>,
-        join: Option<std::thread::JoinHandle<()>>,
-    }
-
-    impl MockServer {
-        fn start() -> Self {
-            let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
-            let port = listener.local_addr().expect("addr").port();
-            listener
-                .set_nonblocking(true)
-                .expect("non blocking listener");
-
-            let stop = Arc::new(AtomicBool::new(false));
-            let last_body = Arc::new(Mutex::new(String::new()));
-            let stop_thread = Arc::clone(&stop);
-            let body_thread = Arc::clone(&last_body);
-
-            let join = std::thread::spawn(move || {
-                while !stop_thread.load(AtomicOrdering::Relaxed) {
-                    match listener.accept() {
-                        Ok((stream, _)) => handle_mock(stream, &body_thread),
-                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                            std::thread::sleep(Duration::from_millis(10));
-                        }
-                        Err(_) => break,
-                    }
-                }
-            });
-
-            Self {
-                port,
-                stop,
-                last_body,
-                join: Some(join),
-            }
-        }
-
-        fn body(&self) -> String {
-            self.last_body.lock().expect("body lock").clone()
-        }
-    }
-
-    impl Drop for MockServer {
-        fn drop(&mut self) {
-            self.stop.store(true, AtomicOrdering::Relaxed);
-            // Wake the accept loop so the thread can exit.
-            let _ = TcpStream::connect(("127.0.0.1", self.port));
-            if let Some(join) = self.join.take() {
-                let _ = join.join();
-            }
-        }
-    }
-
-    fn handle_mock(mut stream: TcpStream, last_body: &Arc<Mutex<String>>) {
-        stream
-            .set_read_timeout(Some(Duration::from_secs(2)))
-            .expect("read timeout");
-
-        let mut buffer = Vec::new();
-        let mut chunk = [0_u8; 1024];
-        let header_end = loop {
-            match stream.read(&mut chunk) {
-                Ok(0) => return,
-                Ok(read) => buffer.extend_from_slice(&chunk[..read]),
-                Err(_) => return,
-            }
-
-            if let Some(position) = find_bytes(&buffer, b"\r\n\r\n") {
-                break position + 4;
-            }
-        };
-
-        let head = String::from_utf8_lossy(&buffer[..header_end]).to_string();
-        let path = head
-            .lines()
-            .next()
-            .and_then(|line| line.split_whitespace().nth(1))
-            .unwrap_or("/")
-            .to_owned();
-        let content_length = head
-            .lines()
-            .find_map(|line| {
-                let (name, value) = line.split_once(':')?;
-                if name.eq_ignore_ascii_case("content-length") {
-                    value.trim().parse::<usize>().ok()
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(0);
-
-        while buffer.len() < header_end + content_length {
-            match stream.read(&mut chunk) {
-                Ok(0) => break,
-                Ok(read) => buffer.extend_from_slice(&chunk[..read]),
-                Err(_) => break,
-            }
-        }
-
-        let body = String::from_utf8_lossy(&buffer[header_end..]).to_string();
-        if path.contains("chat/completions") {
-            *last_body.lock().expect("body lock") = body;
-        }
-
-        let response = if path.ends_with("/v1/models") || path == "/models" {
-            let body = r#"{"object":"list","data":[{"id":"mock-qwen","object":"model"}]}"#;
-            format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            )
-        } else if path.contains("chat/completions") {
-            let body = concat!(
-                "data: {\"choices\":[{\"delta\":{\"content\":\"Hola\"}}]}\n\n",
-                "data: {\"choices\":[{\"delta\":{\"content\":\" mundo\"}}]}\n\n",
-                "data: [DONE]\n\n"
-            );
-            format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            )
-        } else {
-            let body = r#"{"error":"not found"}"#;
-            format!(
-                "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            )
-        };
-
-        let _ = stream.write_all(response.as_bytes());
-        let _ = stream.flush();
-    }
-
-    fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-        haystack
-            .windows(needle.len())
-            .position(|window| window == needle)
-    }
-
-    fn wait_until_ready(handle: &EngineHandle, seconds: u64) -> Option<String> {
-        let deadline = Instant::now() + Duration::from_secs(seconds);
-        while Instant::now() < deadline {
-            if let Some(EngineEvent::Llm { state, detail }) =
-                handle.recv_timeout(Duration::from_millis(100))
-                && state == LlmState::Ready
-            {
-                return Some(detail);
-            }
-        }
-        None
-    }
-
-    fn external_config(endpoint: String) -> VoxConfig {
-        let mut config = VoxConfig::default();
-        config.llm.mode = LlmMode::External;
-        config.llm.endpoint = endpoint;
-        config.llm.auto_start = false;
-        config
-    }
-
-    #[test]
-    fn detects_external_server_without_a_configured_model() {
-        let server = MockServer::start();
-        let mut config = VoxConfig::default();
-        config.llm.mode = LlmMode::Managed;
-        config.llm.model = None;
-        config.llm.host = "127.0.0.1".to_owned();
-        config.llm.port = server.port;
-        config.llm.auto_start = false;
-
-        let handle = spawn(config);
-        assert!(
-            handle.send(EngineCommand::ProbeLlm),
-            "controller should accept commands"
-        );
-
-        let detail = wait_until_ready(&handle, 5).expect("external server must be detected");
-        assert!(detail.contains("Servidor"), "detail was: {detail}");
-        let _ = handle.send(EngineCommand::Shutdown);
-    }
-
-    #[test]
-    fn chats_against_external_endpoint_and_uses_reported_model() {
-        let server = MockServer::start();
-        // Bare host:port must be normalized to http://host:port.
-        let handle = spawn(external_config(format!("127.0.0.1:{}", server.port)));
-
-        let detail = wait_until_ready(&handle, 5).expect("external server must be detected");
-        assert!(detail.contains("openai") || detail.contains("OpenAI") || detail.contains("listo"));
-
-        let generation = 1_u64;
-        assert!(handle.send(EngineCommand::SendMessage {
-            generation,
-            prompt: "Hola".to_owned(),
-        }));
-
-        let mut reply = String::new();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let mut finished = false;
-        while Instant::now() < deadline && !finished {
-            if let Some(event) = handle.recv_timeout(Duration::from_millis(100)) {
-                match event {
-                    EngineEvent::Token { delta, .. } => reply.push_str(&delta),
-                    EngineEvent::ReplyDone { .. } => finished = true,
-                    EngineEvent::Error { message, .. } => panic!("controller error: {message}"),
-                    _ => {}
-                }
-            }
-        }
-
-        assert!(finished, "reply should finish, got: {reply:?}");
-        assert_eq!(reply, "Hola mundo");
-        assert!(
-            server.body().contains("\"model\":\"mock-qwen\""),
-            "chat request should use the reported model id, body was: {}",
-            server.body()
-        );
-
-        let _ = handle.send(EngineCommand::Shutdown);
-    }
-
-    #[test]
-    fn truncate_keeps_utf8_boundaries() {
-        assert_eq!(truncate("hola", 10), "hola");
-        assert_eq!(truncate("hola mundo", 4), "hola…");
     }
 }

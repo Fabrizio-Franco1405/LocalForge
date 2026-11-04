@@ -1,5 +1,10 @@
 # Crate contracts
 
+> **Estado (actualizado):** `shared`, `llm_engine`, `ui` y el controlador están
+> implementados. `stt`, `tts` y `audio_engine` son stubs (M2/M3/M4): sus
+> secciones describen el contrato objetivo, no código existente. La suite de
+> pruebas vive en `test/` (ignorada por git) y usa solo API pública.
+
 ## `shared`
 
 ```rust

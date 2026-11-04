@@ -51,8 +51,11 @@ pub fn apply(cx: &mut App, ui: &UiConfig, window: Option<&mut Window>) {
     cx.refresh_windows();
 }
 
-/// Parses `#rgb` or `#rrggbb`.
-fn parse_hex(value: &str) -> Option<Hsla> {
+/// Parses `#rgb` or `#rrggbb` into an [`Hsla`] color.
+///
+/// Returns `None` for any other format, so callers can fall back to a
+/// semantic theme token instead of rendering an invisible color.
+pub fn parse_hex(value: &str) -> Option<Hsla> {
     let hex = value.trim().trim_start_matches('#');
 
     let expanded = match hex.len() {
@@ -66,16 +69,4 @@ fn parse_hex(value: &str) -> Option<Hsla> {
 
     let parsed = u32::from_str_radix(&expanded, 16).ok()?;
     Some(Hsla::from(rgb(parsed)))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::parse_hex;
-
-    #[test]
-    fn parses_short_and_long_hex() {
-        assert!(parse_hex("#7c5cff").is_some());
-        assert!(parse_hex("#fff").is_some());
-        assert!(parse_hex("not-a-color").is_none());
-    }
 }

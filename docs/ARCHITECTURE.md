@@ -29,26 +29,48 @@ VAD → STT → LLM → TTS con modelos configurables, sobre GPUs sin CUDA/ROCm
 
 ## 3. Mapa de crates
 
+```text
+voxlocal (src/main.rs)        shell GPUI: ventana, configuración y arranque
+voxlocal (src/lib.rs)         fachada de librería: `pub mod controller`
+├── src/controller.rs         hilo controlador: comandos, procesos, HTTP, SSE
+├── crates/ui                 vistas, ajustes, chat, herramientas (solo gpui-kit + shared)
+├── crates/shared             config, tipos, eventos, errores, texto y tools (hoja)
+├── crates/llm_engine         llama-server: spawn, health, SSE, modo externo
+├── crates/stt                whisper-cli: WAV, proceso, parser          (stub, M2)
+├── crates/tts                Kokoro ONNX: worker, limpieza de texto     (stub, M3)
+└── crates/audio_engine       cpal: captura, VAD, endpointing, playback  (stub, M2/M4)
 ```
-voxlocal (src/main.rs)        shell GPUI + controlador + wiring
-├── crates/ui                 vistas, ajustes, chat (solo gpui-kit + shared)
-├── crates/shared             config, tipos, eventos, errores, texto
-├── crates/llm_engine         llama-server: spawn, health, SSE
-├── crates/stt                whisper-cli: WAV, proceso, parser
-├── crates/tts                Kokoro ONNX: worker, limpieza de texto
-└── crates/audio_engine       cpal: captura, VAD, endpointing, playback
-```
+
+El paquete `voxlocal` es **bin + lib**: `main.rs` solo compone la ventana y
+`lib.rs` expone `controller` para que la suite aislada en `test/` pueda
+ejercitarlo sin display.
+
+### Estado de implementación
+
+| Componente | Estado | Detalle |
+| --- | --- | --- |
+| `shared` | Implementado | Config TOML/`VOXLOCAL_*`, eventos, `for_speech`, `truncate_chars`, resolución de binarios |
+| `llm_engine` | Implementado | `build_args`, spawn/kill, health, SSE, `usage`, modo `External` con `/v1/models` |
+| `ui` | Implementado | Chat, ajustes por pestañas, herramientas/diagnóstico, temas |
+| `controller` | Implementado | Comandos, generaciones, probe, historial, apagado |
+| `stt` | Stub (M2) | Contrato documentado en `crates/stt/src/lib.rs` |
+| `tts` | Stub (M3) | Contrato documentado en `crates/tts/src/lib.rs` |
+| `audio_engine` | Stub (M2/M4) | Contrato documentado en `crates/audio_engine/src/lib.rs` |
+
+Un stub **no simula** funcionalidad: compila, documenta su contrato y la UI lo
+muestra deshabilitado o ausente. No se aceptan implementaciones a medias que
+finjan funcionar.
 
 ### Dependencias permitidas
 
 ```text
 ui           -> gpui-kit, shared
 llm_engine   -> shared, tokio, reqwest
-stt          -> shared, tokio, hound
-tts          -> shared, hound
-audio_engine -> shared, cpal, webrtc-vad
+stt          -> shared, tokio, hound          (cuando se implemente)
+tts          -> shared, hound                 (cuando se implemente)
+audio_engine -> shared, cpal, webrtc-vad      (cuando se implemente)
 shared       -> serde, figment, toml, dirs, thiserror
-main         -> todos
+main/lib     -> todos
 ```
 
 `shared` no depende de ningún otro crate del workspace. Esto evita ciclos y
@@ -74,9 +96,15 @@ EngineEvent::Token { generation, delta }
 UI actualiza el último mensaje del asistente
 ```
 
-Cuando el pipeline de voz está activo, el controlador sustituye el texto de
-entrada por el transcript de `stt` y, al terminar la respuesta, envía el texto
-limpio a `tts` y reproduce el audio.
+El controlador soporta dos modos de LLM:
+
+- `Managed`: lanza `llama-server` y habla con `127.0.0.1:<port>`.
+- `External`: no lanza ningún proceso; sondea `/v1/models`, usa el `model`
+  reportado y sirve para Ollama, LM Studio o un `llama-server` ya arrancado.
+
+El pipeline de voz (sustituir el texto por el transcript de `stt` y enviar la
+respuesta limpia a `tts`) está **diseñado pero pendiente**: `stt`, `tts` y
+`audio_engine` son stubs hasta M2/M3/M4, así que hoy la conversación es por texto.
 
 ### 4.2 Voz manos libres
 
@@ -118,9 +146,13 @@ inmutable o contadores de nivel de audio.
 - `VoxConfig`: raíz serializable con secciones `llm`, `stt`, `tts`, `audio`,
   `ui`.
 - `EngineCommand` / `EngineEvent`: el único contrato UI ⇄ motores.
-- `EngineHandle`: fachada clonable con `send` y `try_recv`.
-- `VoxError`: errores de configuración y de canal.
-- `text::for_speech`: limpieza de Markdown/emojis para TTS.
+- `EngineHandle`: fachada clonable con `send`, `try_recv`, `recv_timeout` y
+  `drain`.
+- `ConfigError`: errores de configuración (I/O, TOML inválido, serialización).
+- `text::for_speech` y `text::truncate_chars`: limpieza de Markdown/emojis para
+  TTS y recorte seguro en UTF-8.
+- `tools::{expand_path, resolve_binary, file_status, command_program}`:
+  resolución de binarios y rutas configuradas.
 
 ### `llm_engine`
 
@@ -128,23 +160,29 @@ inmutable o contadores de nivel de audio.
 pub struct LlamaManager { /* ... */ }
 
 impl LlamaManager {
-    pub fn new(cfg: &LlmConfig) -> Result<Self, LlmError>;
-    pub fn build_args(cfg: &LlmConfig) -> Result<Vec<String>, LlmError>;
+    pub fn new(config: LlmConfig, startup_timeout: Duration) -> Result<Self, LlmError>;
+    pub fn build_args(config: &LlmConfig) -> Result<Vec<String>, LlmError>;
     pub async fn start(&mut self) -> Result<(), LlmError>;
-    pub async fn wait_ready(&self, timeout: Duration) -> Result<(), LlmError>;
+    pub async fn wait_ready(&mut self) -> Result<(), LlmError>;
+    pub async fn wait_ready_for(&mut self, timeout: Duration) -> Result<(), LlmError>;
     pub async fn health(&self) -> LlmHealth;
+    pub async fn probe(&self) -> ServerProbe;
     pub async fn chat_stream(
         &self,
         messages: &[ChatMessage],
     ) -> Result<mpsc::Receiver<ChatDelta>, LlmError>;
     pub async fn stop(&mut self);
+    pub fn last_logs(&self, n: usize) -> Vec<String>;
 }
 ```
 
 `Drop` mata el hijo (`start_kill`) y `kill_on_drop(true)` evita zombis incluso
-si el runtime se desmonta de golpe.
+si el runtime se desmonta de golpe. En modo `External` `start()` es un no-op y
+`probe()` es la fuente de verdad del estado.
 
 ### `stt`
+
+**Estado: stub (M2).** El contrato siguiente es el objetivo, no código actual.
 
 ```rust
 pub struct WhisperCli { /* ... */ }
@@ -160,6 +198,9 @@ impl WhisperCli {
 
 ### `tts`
 
+**Estado: stub (M3).** El contrato siguiente es el objetivo; `tools/kokoro_worker.py`
+todavía no existe.
+
 ```rust
 pub trait Synthesizer: Send + Sync {
     fn synthesize(&self, text: &str) -> Result<AudioBuffer, TtsError>;
@@ -168,13 +209,15 @@ pub trait Synthesizer: Send + Sync {
 pub struct KokoroCli { /* ... */ }
 ```
 
-Kokoro corre en **CPU con ONNX Runtime** para no competir por VRAM. El crate
-llama a un worker Python aislado (`.venv-kokoro`) porque los crates Rust de
-Kokoro (`tts-rs`, `kokoro-tts`) están rotos contra `ort 2.0.0-rc.15` (ver
-ADR-004). La interfaz permite sustituirlo por un backend nativo cuando `ort`
-estabilice.
+Kokoro correrá en **CPU con ONNX Runtime** para no competir por VRAM. El plan
+(ADR-004) es llamar a un worker Python aislado (`.venv-kokoro`) porque los
+crates Rust de Kokoro (`tts-rs`, `kokoro-tts`) están rotos contra
+`ort 2.0.0-rc.15`. La interfaz permitirá sustituirlo por un backend nativo
+cuando `ort` estabilice.
 
 ### `audio_engine`
+
+**Estado: stub (M2/M4).** El contrato siguiente es el objetivo.
 
 ```rust
 pub struct AudioCapture;   // cpal input -> Receiver<Vec<f32>> 16 kHz mono
@@ -207,7 +250,7 @@ Rutas por defecto:
 
 ## 8. Errores y logs
 
-- Cada crate define su error con `thiserror`; `shared` ofrece `VoxError` para
+- Cada crate define su error con `thiserror`; `shared` ofrece `ConfigError` para
   el límite de la aplicación.
 - La UI nunca hace `unwrap` sobre errores de motor: los muestra como
   notificación o en la barra de estado.
@@ -246,7 +289,8 @@ VRAM. Se puede solapar síntesis y reproducción por frases.
 `ort 2.0.0-rc.15` (API de `Session::builder` cambió). Escribir el tokenizador
 de Kokoro desde cero es un proyecto aparte.
 **Decisión:** worker Python mínimo (`tools/kokoro_worker.py`) con
-`kokoro-onnx` y ONNX Runtime CPU, en un venv propio.
+`kokoro-onnx` y ONNX Runtime CPU, en un venv propio. **Pendiente de
+implementar (M3):** hoy `tools/` no existe y `crates/tts` es un stub.
 **Consecuencia:** cero PyTorch/CUDA y modelos ONNX; se paga una dependencia de
 Python en runtime. La trait `Synthesizer` permite reemplazarlo por un backend
 nativo cuando `ort` y los crates Kokoro vuelvan a compilar.
@@ -266,3 +310,21 @@ una latencia de UI acotada a 50 ms.
 - Los logs no incluyen audio ni prompts completos por defecto.
 - El worker de TTS se lanza sin shell, con argumentos separados (sin
   inyección de comandos); el texto va por stdin.
+
+## 11. Pruebas
+
+- La suite vive en `test/`: crate propio con `[workspace]`, **fuera del
+  workspace** y **fuera de git** (`.gitignore` ignora `/test/`). El repositorio
+  solo versiona el código de la aplicación.
+- No hay módulos `#[cfg(test)]` en `src/` ni en `crates/`; si algo necesita
+  test, se expone una API pública mínima y documentada
+  (`shared::text::truncate_chars`, `llm_engine::{take_sse_payloads, parse_delta}`,
+  `ui::theme::parse_hex`).
+- Comando: `cd test && cargo test`. Cubre `shared` (23), `llm_engine` (10),
+  `ui` (7) y el controlador (2): 42 tests sin GPU, micrófono, modelos ni red
+  externa. El controlador se prueba contra un servidor OpenAI falso en loopback.
+- Lo que requiere hardware, modelos o latencia real es checklist manual
+  (`test/docs/hardware.md`), no un test automatizado.
+- Consecuencia asumida: al no versionarse, la suite no protege PRs remotos; es
+  una red de seguridad local. Para CI con tests habría que versionar un espejo
+  o reconstruir la carpeta en el workflow.

@@ -199,39 +199,3 @@ pub fn engine_channel() -> (
         event_tx,
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn handle_round_trips_commands_and_events() {
-        let (handle, commands, events) = engine_channel();
-
-        assert!(handle.send(EngineCommand::StartLlm));
-        assert!(matches!(commands.recv().unwrap(), EngineCommand::StartLlm));
-
-        events
-            .send(EngineEvent::Llm {
-                state: LlmState::Ready,
-                detail: "ok".to_owned(),
-            })
-            .unwrap();
-
-        let drained = handle.drain();
-        assert_eq!(drained.len(), 1);
-        assert!(matches!(
-            drained[0],
-            EngineEvent::Llm {
-                state: LlmState::Ready,
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn state_labels_are_stable() {
-        assert_eq!(LlmState::Ready.label(), "Listo");
-        assert_eq!(LlmState::Error.label(), "Error");
-    }
-}

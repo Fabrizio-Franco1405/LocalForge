@@ -43,7 +43,10 @@ curl -L -o assets/models/whisper/ggml-small.bin \
 
 Para español, `-l es`. Si el modelo es `.en`, no lo uses para español.
 
-## TTS (Kokoro v1.0 ONNX)
+## TTS (Kokoro v1.0 ONNX) — pendiente (M3)
+
+El crate `tts` todavía es un stub: no hay worker ni síntesis. Descarga estos
+archivos solo si vas a implementar M3; hoy la app funciona sin ellos.
 
 Archivos necesarios en `assets/models/kokoro/`:
 

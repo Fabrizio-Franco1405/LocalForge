@@ -36,6 +36,8 @@ whisper-cli -m ggml-small.bin -f muestra.wav -l es -pp
 En Windows el driver AMD moderno incluye Vulkan; en macOS, MoltenVK traduce a
 Metal y el rendimiento es menor, pero funciona.
 
+Checklist manual paso a paso (local, no versionado): `test/docs/hardware.md`.
+
 ## 3. Presupuesto de VRAM (8 GB)
 
 | Uso | VRAM aproximada |

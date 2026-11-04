@@ -4,12 +4,11 @@
 //! single GPUI window. All engine work lives behind `EngineHandle`; this file
 //! only composes the window and applies the saved theme.
 
-mod controller;
-
 use gpui_kit::*;
 use shared::VoxConfig;
 use tracing_subscriber::EnvFilter;
 use ui::config;
+use voxlocal::controller;
 
 fn main() {
     tracing_subscriber::fmt()

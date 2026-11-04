@@ -12,16 +12,22 @@ Este proyecto está diseñado **exclusivamente para hardware de gama media/antig
 - **Regla de Oro:** Si una librería o herramienta requiere CUDA o ROCm, debe ser descartada o sustituida por una alternativa basada en Vulkan o CPU.
 
 ## 3. Arquitectura: Feature Crates
-El proyecto sigue el patrón de **Feature Crates** de GPUI Kit. La raíz es un Workspace con un `main.rs` en `src/` y los módulos de lógica en `crates/`:
-- `crates/app` (o raíz `src/main.rs`): Shell de GPUI. Solo compone ventanas, inicializa el runtime y conecta la UI con los servicios.
-- `crates/llm_engine`: Gestión del proceso `llama-server` (spawn, kill, health-check, configuración de `-ngl`, puerto, etc.).
-- `crates/audio_engine`: Captura de micrófono, detección de actividad de voz (VAD) y reproducción de audio.
-- `crates/stt`: Wrapper para `whisper-cli` (transcripción de audio a texto).
-- `crates/tts`: Wrapper para `kokoro-onnx` (síntesis de texto a voz).
-- `crates/ui`: Componentes visuales reutilizables de GPUI Kit (Settings, formularios, etc.).
-- `crates/shared`: Tipos comunes, errores, eventos y estructuras de configuración global.
+El proyecto sigue el patrón de **Feature Crates** de GPUI Kit. La raíz es un Workspace con un `main.rs` (shell) y `lib.rs` (controlador testeable) en `src/`, y los módulos de lógica en `crates/`:
+- `src/main.rs`: Shell de GPUI. Solo compone la ventana, carga configuración y arranca el controlador.
+- `src/lib.rs`: Expone `controller` para poder probarlo desde fuera del binario.
+- `src/controller.rs`: Hilo del controlador (comandos, procesos, HTTP, generaciones).
+- `crates/llm_engine`: Gestión del proceso `llama-server` (spawn, kill, health-check, `-ngl`, puerto, SSE) y modo externo.
+- `crates/audio_engine`: Captura de micrófono, VAD y reproducción de audio. **Stub (M2/M4).**
+- `crates/stt`: Wrapper para `whisper-cli`. **Stub (M2).**
+- `crates/tts`: Wrapper para `kokoro-onnx`. **Stub (M3).**
+- `crates/ui`: Componentes visuales de GPUI Kit (chat, Settings, herramientas).
+- `crates/shared`: Tipos comunes, configuración, eventos y utilidades de texto/rutas. Es hoja.
 
 **Regla de oro:** La UI (`crates/ui`) no debe saber cómo se lanza `llama-server`. Solo emite eventos o llama a métodos expuestos por `crates/llm_engine`. La lógica de negocio no debe depender de GPUI.
+
+Nota de estado: `llm_engine`, `shared`, `ui` y el controlador están implementados; `stt`,
+`tts` y `audio_engine` compilan como placeholders con su contrato en el docstring.
+No añadas funcionalidad simulada: implementa el crate o deja el stub honesto.
 
 ## 4. Stack Tecnológico y Documentación Oficial (Solo Vulkan)
 
@@ -42,9 +48,10 @@ El proyecto sigue el patrón de **Feature Crates** de GPUI Kit. La raíz es un W
 - **API:** Compatible con OpenAI (`/v1/chat/completions`).
 - **Reglas:**
   - El proceso se lanza con `tokio::process::Command`.
-  - La configuración (`LlamaConfig`) debe incluir: `model_path`, `port`, `ngl` (capas en GPU), `threads`.
-  - El `LlamaManager` debe exponer métodos `start()`, `stop()` y `health_check()` (usando `GET /health`).
-  - El proceso hijo debe ser eliminado en el `Drop` trait para evitar zombis.
+  - La configuración (`LlmConfig`) incluye `model`, `mode` (`Managed`/`External`), `host`, `port`, `gpu_layers`, `ctx_size`, `threads`, `extra_args`.
+  - El `LlamaManager` expone `start()`, `stop()`, `health()`, `wait_ready()` y `chat_stream()`.
+  - El proceso hijo se elimina en `Drop` (`start_kill`) y con `kill_on_drop(true)`.
+  - En modo `External` no se lanza ningún proceso: se sondea `/v1/models`, se usa el `model` reportado y `/health` solo si existe.
   - **Obligatorio:** Compilar `llama.cpp` con `-DGGML_VULKAN=ON`.
 
 ### 4.3 STT: whisper.cpp (whisper-cli) con Vulkan
@@ -53,16 +60,18 @@ El proyecto sigue el patrón de **Feature Crates** de GPUI Kit. La raíz es un W
 - **Reglas:**
   - El binario `whisper-cli` se invoca como subproceso con argumentos: `-m <model_path> -f <audio.wav> -l <language>`.
   - El audio de entrada debe ser WAV mono a 16 kHz.
-  - La salida estándar debe parsearse para extraer el texto transcrito (buscar líneas con `[timestamp]`).
+  - La salida estándar se parsea de forma tolerante: líneas con `[timestamp]` o texto
+    plano (se invoca con `-nt`, que quita timestamps); descarta `[BLANK_AUDIO]` y similares.
   - **Obligatorio:** Compilar `whisper.cpp` con `-DGGML_VULKAN=1`.
 
 ### 4.4 TTS: kokoro-onnx (CPU / ONNX Runtime)
+- **Estado:** pendiente (M3); `crates/tts` es un stub y `tools/` aún no existe.
 - **Repositorio:** https://github.com/xieren58/kokoro-onnx
 - **Modelo y Voces:** https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.0
 - **Voces disponibles:** https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md
 - **Reglas:**
   - Kokoro se ejecuta en CPU a través de ONNX Runtime para no competir por la VRAM con el LLM y Whisper.
-  - El texto debe limpiarse de emojis y símbolos Markdown antes de enviarse a Kokoro.
+  - El texto debe limpiarse de emojis y símbolos Markdown (`shared::text::for_speech`) antes de enviarse a Kokoro.
   - La voz y el idioma deben ser configurables desde la UI.
 
 ### 4.5 Pipeline de Voz (Referencia): speech-to-speech
@@ -70,11 +79,23 @@ El proyecto sigue el patrón de **Feature Crates** de GPUI Kit. La raíz es un W
 - **Uso:** Este framework es la referencia conceptual para la arquitectura en cascada (VAD → STT → LLM → TTS). No es una dependencia directa, pero sus patrones de diseño (colas, hilos) deben inspirar la implementación del `audio_engine`.
 
 ## 5. Configuración Segmentada
-- Cada crate define su propia estructura de configuración con `serde` (ej. `LlamaConfig`, `TtsConfig`, `SttConfig`).
-- La carga se centraliza en `crates/shared` usando `figment` (o `config`) para combinar archivos TOML y variables de entorno.
-- La UI de configuración debe usar el componente `Settings` de GPUI Kit, generando pestañas automáticamente a partir de las estructuras.
+- Las estructuras `serde` (`LlamaConfig`, `SttConfig`, `TtsConfig`, `AudioConfig`, `UiConfig`) viven en `crates/shared/src/config.rs` y se agrupan en `VoxConfig`.
+- La carga se centraliza en `shared::config` con `figment` (TOML + `VOXLOCAL_*`); no leas `std::env::var` fuera de ahí.
+- La UI de configuración usa el componente `Settings` de GPUI Kit y persiste con `VoxConfig::save`.
 
-## 6. Comandos de Desarrollo
+## 6. Pruebas (aisladas)
+
+- La suite vive en `test/`, un crate propio con `[workspace]` (fuera del workspace de la app).
+- `test/` está en `.gitignore`: el repositorio solo versiona el código de la aplicación.
+- No agregues `#[cfg(test)]` ni `mod tests` en `src/` ni en `crates/`; los tests van a
+  `test/tests/`.
+- Para probar lógica privada, expón una API pública pequeña y documentada (ej.
+  `shared::text::truncate_chars`, `ui::theme::parse_hex`), no dejes el test dentro del crate.
+- Comando: `cd test && cargo test` (42 tests; sin GPU, micrófono, modelos ni red externa).
+- Lo que requiera hardware, modelos o latencia real va a `test/docs/hardware.md` como
+  checklist manual, no como test automatizado.
+
+## 7. Comandos de Desarrollo
 ```bash
 # Compilar todo el workspace
 cargo build
@@ -83,7 +104,12 @@ cargo build
 cargo run
 
 # Verificar linting
-cargo clippy -- -D warnings
+cargo clippy --all-targets --all-features -- -D warnings
 
 # Formatear código
-cargo fmt
+cargo fmt --all
+
+# Pruebas (crate aislado, fuera del workspace y de git)
+cd test && cargo test
+```
+

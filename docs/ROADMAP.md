@@ -1,27 +1,31 @@
 # Roadmap
 
-Cada hito debe terminar con `cargo fmt`, `cargo clippy -- -D warnings` y
-`cargo test` en verde. Los criterios de aceptación se prueban en la máquina
-objetivo (RX 5700 XT + 5700G).
+Cada hito debe terminar con `cargo fmt --all`,
+`cargo clippy --all-targets -- -D warnings` y `cd test && cargo test` en verde.
+Los criterios de aceptación se prueban en la máquina objetivo (RX 5700 XT +
+5700G).
 
-## M0 — Fundaciones (completado en este scaffold)
+## M0 — Fundaciones (estado real)
 
-- Workspace de 6 crates + shell GPUI Kit.
-- `VoxConfig` con TOML, variables de entorno y valores por defecto.
-- Contratos `EngineCommand` / `EngineEvent` y `EngineHandle`.
-- `LlamaManager` con spawn, health-check, streaming SSE y limpieza.
-- `WhisperCli` con WAV 16 kHz y parser tolerante.
-- `KokoroCli` + worker Python aislado + limpieza de texto.
-- `AudioCapture`, `AudioPlayer`, `EndpointDetector` y `LinearResampler`.
-- UI: chat + ajustes + barra de estado.
+- [x] Workspace de 6 crates + shell GPUI Kit (bin + lib).
+- [x] `VoxConfig` con TOML, variables de entorno y valores por defecto.
+- [x] Contratos `EngineCommand` / `EngineEvent` y `EngineHandle`.
+- [x] `LlamaManager` con spawn, health-check, streaming SSE, modo externo y limpieza.
+- [x] Controlador: comandos, generaciones, diagnóstico y apagado.
+- [x] UI: chat + ajustes + herramientas + barra de estado.
+- [x] Suite de pruebas aislada en `test/` (42 tests, fuera de git).
+- [ ] `WhisperCli` (WAV 16 kHz + parser) → M2.
+- [ ] `KokoroCli` + worker Python → M3.
+- [ ] `AudioCapture`, `AudioPlayer`, `EndpointDetector` y `LinearResampler` → M2/M4.
 
-**Criterio:** `cargo run` abre la app, permite guardar ajustes y conversar con
-un GGUF local por texto.
+**Criterio:** `cargo run` abre la app, guarda ajustes y conversa por texto con
+un GGUF local o un servidor OpenAI externo.
 
 ## M1 — Conversación por texto sólida
 
 - [ ] Historial persistente por sesión (JSONL en `data_dir`).
-- [ ] Cancelación cooperativa del streaming (AbortHandle + generación).
+- [x] Cancelación lógica del streaming por generación (los tokens viejos se descartan).
+- [ ] Abortar el request HTTP en curso (hoy se sigue leyendo el SSE hasta `[DONE]`).
 - [ ] Reintento automático si `llama-server` muere a mitad de respuesta.
 - [ ] Mostrar métricas: tokens/s, tiempo hasta el primer token, VRAM usada.
 - [ ] Selector de modelos GGUF escaneando `assets/models/llm`.

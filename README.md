@@ -22,17 +22,21 @@ Micrófono ──► VAD ──► whisper.cpp (Vulkan) ──► llama.cpp (Vul
 
 ## Estado
 
-- [x] Workspace de crates y shell GPUI Kit
-- [x] Configuración segmentada y persistente (`shared`)
-- [x] Gestión del proceso `llama-server` con health-check y chat en streaming (`llm_engine`)
-- [x] Wrapper de `whisper-cli` con WAV 16 kHz y parser de salida (`stt`)
-- [x] TTS Kokoro ONNX vía worker aislado + limpieza de texto (`tts`)
-- [x] Captura/playback cpal, VAD WebRTC y endpointing (`audio_engine`)
-- [x] UI de chat y ajustes (`ui`)
+- [x] Workspace de crates, shell GPUI Kit y librería `voxlocal` (bin + lib)
+- [x] Configuración segmentada y persistente (`shared`: TOML, `VOXLOCAL_*`, tools)
+- [x] Gestión de `llama-server` con health-check, SSE y `-ngl` (`llm_engine`)
+- [x] Modo externo: detecta un servidor OpenAI local y usa el modelo de `/v1/models`
+- [x] UI de chat, ajustes y herramientas (`ui`)
+- [x] Controlador: comandos, generaciones, diagnóstico y apagado (`src/controller.rs`)
+- [ ] STT con `whisper-cli` (`stt`) — stub documentado, hito M2
+- [ ] TTS Kokoro ONNX (`tts`) — stub documentado, hito M3
+- [ ] Captura, VAD y playback (`audio_engine`) — stub documentado, hitos M2/M4
 - [ ] Conversación manos libres completa (barge-in, streaming TTS)
 - [ ] Empaquetado e instaladores
 
-Consulta [docs/ROADMAP.md](docs/ROADMAP.md) para el plan por hitos.
+Los crates sin implementar compilan como placeholders con su contrato en el
+docstring; no fingen funcionalidad. Consulta [docs/ROADMAP.md](docs/ROADMAP.md)
+para el plan por hitos.
 
 ## Inicio rápido
 
@@ -86,14 +90,14 @@ curl -L -o assets/models/whisper/ggml-small.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
 ```
 
-### 4. Kokoro (TTS)
+### 4. Kokoro (TTS) — pendiente (M3)
 
-```bash
-./tools/setup_kokoro.sh
-```
+Todavía no hay worker de TTS: `tools/kokoro_worker.py` y `tools/setup_kokoro.sh`
+se crearán con el hito M3. La app funciona sin ellos; el backend `tts` es un
+stub documentado y la UI lo muestra como deshabilitado.
 
-Crea un entorno virtual aislado en `.venv-kokoro/` con `kokoro-onnx` (ONNX Runtime, no
-PyTorch) y descarga los modelos en `assets/models/kokoro/`.
+Cuando exista, creará un entorno aislado en `.venv-kokoro/` con `kokoro-onnx`
+(ONNX Runtime, no PyTorch) y descargará los modelos en `assets/models/kokoro/`.
 
 ### 5. Ejecutar
 
@@ -118,6 +122,19 @@ configuración se guarda en:
 | [docs/MODELS.md](docs/MODELS.md) | Modelos recomendados y descargas |
 | [AGENTS.md](AGENTS.md) | Contexto del proyecto y reglas para agentes |
 
+## Pruebas
+
+La suite vive en `test/`, es un crate propio **fuera del workspace** y está
+ignorada por git: el repositorio solo versiona el código de la app.
+
+```bash
+cd test && cargo test        # 42 tests: shared, llm_engine, ui, controller
+```
+
+No necesita GPU, micrófono ni modelos. El detalle (cobertura, fixtures y
+checklist manual en la máquina objetivo) está en `test/README.md`,
+`test/docs/plan.md` y `test/docs/hardware.md`, que por diseño no se versionan.
+
 ## Skills para agentes
 
 Las skills locales viven en `.agents/skills/` y son la guía operativa del proyecto:
@@ -128,6 +145,7 @@ Las skills locales viven en `.agents/skills/` y son la guía operativa del proye
 - `voice-pipeline` — VAD, STT, LLM, TTS y latencia
 - `process-supervision` — procesos hijos, health-checks y limpieza
 - `voxlocal-workflow` — build, modelos, verificación y releases
+- `rust-best-practices` — borrowing, clippy, errores, tests y type-state
 
 ## Licencia
 

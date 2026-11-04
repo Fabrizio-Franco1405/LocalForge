@@ -1,1 +1,12 @@
+# Build
 /target
+
+# Suite de pruebas aislada: se queda en local y no viaja con la app.
+/test/
+
+# Modelos y binarios de inferencia locales (nunca se versionan)
+/assets/bin/
+/assets/models/
+
+# Entorno Python del worker TTS (cuando exista, M3)
+/.venv-kokoro/

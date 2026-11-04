@@ -3,6 +3,11 @@
 //! The settings component writes through [`update`], which persists the TOML
 //! file immediately. Engine processes are only restarted when the user presses
 //! *Aplicar*, so typing a path does not spawn anything.
+//!
+//! [`GlobalConfig`] is `Clone`, and [`update`] re-installs it with
+//! [`App::set_global`]. That is what notifies GPUI global observers, so views
+//! (settings pages, status bar, theme) rebuild as soon as a value changes.
+//! Mutating it in place with `global_mut` would **not** notify anyone.
 
 use std::path::{Path, PathBuf};
 
@@ -10,6 +15,7 @@ use gpui_kit::*;
 use shared::VoxConfig;
 
 /// Global holding the live configuration and the last applied snapshot.
+#[derive(Clone)]
 pub struct GlobalConfig {
     /// Values currently shown and edited in the settings page.
     pub config: VoxConfig,
@@ -68,25 +74,32 @@ pub fn is_dirty(cx: &App) -> bool {
         .is_some_and(GlobalConfig::dirty)
 }
 
-/// Edits the configuration and writes it to disk.
+/// Edits the configuration, writes it to disk, and notifies observers.
 ///
-/// Keeping the file in sync means a crash never loses the user's paths; the
-/// running engines still only change when the configuration is applied.
+/// The running engines still only change when the user presses *Aplicar*; this
+/// function only updates the edited draft and its persisted TOML.
 pub fn update(cx: &mut App, f: impl FnOnce(&mut VoxConfig)) {
-    let config_path = {
-        let global = cx.global_mut::<GlobalConfig>();
-        f(&mut global.config);
-        global.path.clone()
-    };
-    persist(cx, &config_path);
+    let mut global = cx.global::<GlobalConfig>().clone();
+    f(&mut global.config);
 
-    // Apply appearance live so accent, radius, font size, etc. take effect
-    // immediately without restarting the app.
-    let ui = cx.global::<GlobalConfig>().config.ui.clone();
+    let result = global.config.save(&global.path);
+    global.save_error = result.err().map(|error| error.to_string());
+
+    let ui = global.config.ui.clone();
+
+    // `set_global` emits `NotifyGlobalObservers`, which is what makes the
+    // settings pages rebuild (managed ↔ external fields) and the theme update.
+    cx.set_global(global);
+
+    // Re-apply appearance so accent / mode / radius / font size land at once.
     crate::theme::apply(cx, &ui, None);
+}
 
-    // Force every view to re-render so the new colors take effect.
-    cx.refresh_windows();
+/// Marks the current draft as applied without changing any value.
+pub fn mark_applied(cx: &mut App) {
+    let mut global = cx.global::<GlobalConfig>().clone();
+    global.mark_applied();
+    cx.set_global(global);
 }
 
 /// Writes the current configuration to `path`.

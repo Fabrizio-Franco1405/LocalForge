@@ -1,5 +1,9 @@
 # Kokoro TTS (ONNX, CPU)
 
+> **Estado: pendiente (M3).** `crates/tts` es un stub y
+> `tools/kokoro_worker.py` todavía no existe. Esta guía describe cómo
+> implementarlo, no funcionalidad disponible.
+
 ## Why a worker process
 
 Kokoro is an 82M-parameter ONNX model. In v0.1 it runs through
@@ -39,7 +43,8 @@ curl -L -o assets/models/kokoro/kokoro-v1.0.int8.onnx "$BASE/kokoro-v1.0.int8.on
 curl -L -o assets/models/kokoro/voices-v1.0.bin "$BASE/voices-v1.0.bin"
 ```
 
-`tools/setup_kokoro.sh` automates this and verifies the files.
+`tools/setup_kokoro.sh` (cuando exista, M3) automatiza esto y verifica los
+archivos.
 
 ## Worker contract
 

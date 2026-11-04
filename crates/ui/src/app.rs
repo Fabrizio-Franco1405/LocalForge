@@ -1179,15 +1179,3 @@ fn info_card(title: &'static str, body: &str, cx: &App) -> impl IntoElement {
                 .child(body.to_owned()),
         )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::Page;
-
-    #[test]
-    fn page_labels_are_stable() {
-        assert_eq!(Page::Chat.label(), "Conversación");
-        assert_eq!(Page::Settings.label(), "Ajustes");
-        assert_eq!(Page::Tools.label(), "Herramientas");
-    }
-}
