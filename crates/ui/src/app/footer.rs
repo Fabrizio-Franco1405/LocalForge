@@ -98,6 +98,15 @@ impl VoxApp {
                         theme.muted_foreground,
                         cx,
                     ))
+                    .child(metric(
+                        IconName::Bot,
+                        match self.llm_mb {
+                            Some(value) => format!("LLM {value} MB"),
+                            None => "LLM —".to_owned(),
+                        },
+                        theme.muted_foreground,
+                        cx,
+                    ))
                     .child(metric(IconName::Mic, mic_label.to_owned(), mic_color, cx))
                     .child(metric(
                         IconName::Volume2,

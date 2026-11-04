@@ -30,6 +30,15 @@ fn main() {
         }
     };
 
+    let mut config = config;
+    if let Some(model) = config.llm.model.clone() {
+        let fixed = shared::config::first_split_shard(&model);
+        if fixed != model {
+            config.llm.model = Some(fixed);
+            let _ = config.save(&config_path);
+        }
+    }
+
     let engine = controller::spawn(config.clone());
 
     application().with_assets(assets::AllAssets).run(move |cx| {

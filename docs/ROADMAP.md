@@ -37,7 +37,9 @@ un GGUF local o un servidor OpenAI externo.
 
 ## M2 — Dictado (STT)
 
-- [ ] Botón de micrófono con push-to-talk y waveform.
+- [x] Captura cpal, VAD WebRTC y endpointing.
+- [x] Wrapper `whisper-cli` con WAV 16 kHz y parser.
+- [ ] Waveform en la vista de Llamada (la esfera ya usa `SpeechLevel`).
 - [ ] Captura multidispositivo y selección persistente.
 - [ ] VAD WebRTC con umbral y silencio configurables en caliente.
 - [ ] Transcripción en < 1,5 s para 5 s de audio con `ggml-small`.
@@ -47,6 +49,7 @@ un GGUF local o un servidor OpenAI externo.
 
 ## M3 — Respuesta hablada (TTS)
 
+- [x] Backend TTS Kokoro (worker) + comando externo + playback cpal.
 - [ ] Reproducción por frases solapada con la generación del LLM.
 - [ ] Cola de audio con cancelación (barge-in).
 - [ ] Voces Kokoro por idioma y velocidad configurables.

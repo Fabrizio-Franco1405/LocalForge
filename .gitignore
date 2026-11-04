@@ -2,7 +2,7 @@
 /target
 
 # Suite de pruebas aislada: se queda en local y no viaja con la app.
-/test/
+
 
 # Modelos y binarios de inferencia locales (nunca se versionan)
 /assets/bin/

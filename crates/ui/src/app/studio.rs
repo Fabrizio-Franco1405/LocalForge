@@ -52,7 +52,7 @@ impl VoxApp {
                             .child("Trellis.cpp"),
                     )
                     .child(div().text_xs().text_color(theme.muted_foreground).child(
-                        "Genera mallas 3D en local. El backend se conectará como un motor más.",
+                        "Generación de mallas 3D en local. El backend se integra como un motor adicional.",
                     ))
                     .child(path_row("Binario", &trellis, cx))
                     .child(
@@ -215,7 +215,7 @@ impl VoxApp {
                             )
                             .child(
                                 div().text_xs().text_color(theme.muted_foreground).child(
-                                    "El visor se activará cuando el motor 3D esté conectado.",
+                                    "El visor se habilitará cuando el motor 3D esté conectado.",
                                 ),
                             )
                             .child(

@@ -60,10 +60,10 @@ impl WorkspaceMode {
     /// One-line description shown under the header title.
     pub fn subtitle(self) -> &'static str {
         match self {
-            Self::Chat => "Conversación de texto con el motor conectado.",
-            Self::Call => "Modo voz inmersivo: habla y escucha sin teclado.",
-            Self::Studio3d => "Genera mallas locales con tu Trellis.cpp.",
-            Self::Settings => "Motores, audio, 3D y sistema.",
+            Self::Chat => "Conversación de texto con el motor local.",
+            Self::Call => "Llamada de voz con inicio y fin manuales.",
+            Self::Studio3d => "Generación de mallas locales mediante Trellis.cpp.",
+            Self::Settings => "Configuración de motores, audio, 3D y sistema.",
         }
     }
 
@@ -153,9 +153,12 @@ pub struct VoxApp {
     app_mb: Option<u64>,
     vram_used_mb: Option<u64>,
     vram_total_mb: Option<u64>,
+    llm_mb: Option<u64>,
     speaking: bool,
     pulse: f32,
     call_caption: String,
+    call_active: bool,
+    call_started_engine: bool,
     hardware: Vec<DiagnosticItem>,
     hardware_loaded: bool,
     studio_image: Option<PathBuf>,
@@ -172,8 +175,9 @@ pub struct VoxApp {
 impl VoxApp {
     /// Builds the view and starts the event pump.
     pub fn new(window: &mut Window, cx: &mut Context<Self>, engine: EngineHandle) -> Self {
-        let draft = cx
-            .new(|cx| InputState::new(window, cx).placeholder("Escribe un mensaje y pulsa Enter…"));
+        let draft = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Introduzca un mensaje y pulse Enter…")
+        });
 
         let _draft_sub = cx.subscribe_in(&draft, window, |this, state, event, window, cx| {
             if matches!(event, InputEvent::PressEnter { shift: false, .. }) {
@@ -221,9 +225,12 @@ impl VoxApp {
             app_mb: None,
             vram_used_mb: None,
             vram_total_mb: None,
+            llm_mb: None,
             speaking: false,
             pulse: 0.0,
             call_caption: String::new(),
+            call_active: false,
+            call_started_engine: false,
             hardware: Vec::new(),
             hardware_loaded: false,
             studio_image: None,
@@ -334,6 +341,7 @@ impl VoxApp {
                 app_mb,
                 vram_used_mb,
                 vram_total_mb,
+                llm_mb,
             } => {
                 self.cpu = cpu_percent;
                 self.ram_total_mb = ram_total_mb;
@@ -341,10 +349,15 @@ impl VoxApp {
                 self.app_mb = app_mb;
                 self.vram_used_mb = vram_used_mb;
                 self.vram_total_mb = vram_total_mb;
+                self.llm_mb = llm_mb;
                 true
             }
             EngineEvent::Models { entries } => {
                 config::set_models(cx, entries);
+                true
+            }
+            EngineEvent::AudioDevices { inputs, outputs } => {
+                config::set_audio_devices(cx, inputs, outputs);
                 true
             }
             EngineEvent::Hardware { items } => {
@@ -355,6 +368,10 @@ impl VoxApp {
             EngineEvent::Error { scope, message } => {
                 if self.streaming.take().is_some() {
                     self.log.finish_reply("");
+                }
+                if scope == "audio" {
+                    self.listening = false;
+                    self.call_active = false;
                 }
                 self.notice = Some(format!("{scope}: {message}"));
                 true
@@ -474,7 +491,7 @@ impl VoxApp {
     fn toggle_listening(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !config::current(cx).stt.enabled {
             window.push_notification(
-                Notification::warning("Activa el dictado en Ajustes → Reconocimiento"),
+                Notification::warning("El dictado está desactivado (Ajustes → Motor Audio)"),
                 cx,
             );
             return;

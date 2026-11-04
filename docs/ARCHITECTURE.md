@@ -53,9 +53,9 @@ ejercitarlo sin display.
 | `llm_engine` | Implementado | `build_args`, spawn/kill, health, SSE, `usage`, modo `External` con `/v1/models` |
 | `controller` | Implementado | Comandos, generaciones, probe, historial, diagnóstico, CPU/RAM/VRAM (`system.rs`), hardware (`hardware.rs`) y escaneo de GGUF (`models.rs`) |
 | `ui` | Implementado | Workspaces Chat/Llamada/Estudio 3D/Ajustes, footer de recursos y Ajustes por pestañas |
-| `stt` | Stub (M2) | Contrato documentado en `crates/stt/src/lib.rs` |
-| `tts` | Stub (M3) | Contrato documentado en `crates/tts/src/lib.rs` |
-| `audio_engine` | Stub (M2/M4) | Contrato documentado en `crates/audio_engine/src/lib.rs` |
+| `stt` | Implementado | `whisper-cli`, WAV 16 kHz, timeout de 60 s y parser tolerante |
+| `tts` | Implementado | Worker Kokoro (`tools/kokoro_worker.py`), comando externo y WAV 24 kHz |
+| `audio_engine` | Implementado | cpal, downmix/remuestreo, VAD, endpointing y playback |
 | `scene3d` | Stub (futuro) | Contrato documentado en `crates/scene3d/src/lib.rs` |
 
 Un stub **no simula** funcionalidad: compila, documenta su contrato y la UI lo
@@ -198,13 +198,18 @@ pub fn spawn(config: VoxConfig) -> EngineHandle;
 - `ProbeHardware` collects OS/CPU/RAM/GPU/tools and emits `EngineEvent::Hardware`.
 - `ScanModels` walks `llm.models_dir` (following file symlinks) and emits
   `EngineEvent::Models` for the alias-aware library.
+- `ScanAudioDevices` emits `EngineEvent::AudioDevices`; the UI renders both
+device fields as dropdowns.
+- A model swap waits for the managed port to be free before probing, so the
+  old server cannot be mistaken for the new model. Split GGUF shards are
+  filtered in the library and normalized to the first shard when loading.
 - `SystemUsage` (CPU, RAM, VRAM, app memory) is sampled every 2 s in an
   independent task, so values are visible even while a model is loading.
 - Emits only [`EngineEvent`]; the UI never calls an engine directly.
 
 ### `stt`
 
-**Estado: stub (M2).** El contrato siguiente es el objetivo, no código actual.
+Implementado en `crates/stt/src/lib.rs`: WAV temporal PCM16 16 kHz, proceso con timeout y parser de timestamps/plano.
 
 ```rust
 pub struct WhisperCli { /* ... */ }
@@ -220,8 +225,7 @@ impl WhisperCli {
 
 ### `tts`
 
-**Estado: stub (M3).** El contrato siguiente es el objetivo; `tools/kokoro_worker.py`
-todavía no existe.
+Implementado: `KokoroCli` (worker Python) y `ExternalCommand`, con limpieza de texto y WAV de salida.
 
 ```rust
 pub trait Synthesizer: Send + Sync {
@@ -239,7 +243,7 @@ cuando `ort` estabilice.
 
 ### `audio_engine`
 
-**Estado: stub (M2/M4).** El contrato siguiente es el objetivo.
+Implementado: captura cpal (callback → canal acotado → worker VAD), remuestreo lineal a 16 kHz y playback.
 
 ```rust
 pub struct AudioCapture;   // cpal input -> Receiver<Vec<f32>> 16 kHz mono
@@ -357,8 +361,8 @@ navegación.
   test, se expone una API pública mínima y documentada
   (`shared::text::truncate_chars`, `llm_engine::{take_sse_payloads, parse_delta}`,
   `ui::theme::parse_hex`).
-- Comando: `cd test && cargo test`. Cubre `shared` (24), `llm_engine` (11), `system` (8),
-  `ui` (8), el controlador (2), sistema (8) y frontera (2): 55 tests sin GPU, micrófono, modelos ni red
+- Comando: `cd test && cargo test`. Cubre `shared` (24), `llm_engine` (11), `system` (8), `audio` (4),
+  `ui` (8), el controlador (2), sistema (9), audio (5), llm (12) y frontera (2): 62 tests sin GPU, micrófono, modelos ni red
   externa. El controlador se prueba contra un servidor OpenAI falso en loopback.
 - Lo que requiere hardware, modelos o latencia real es checklist manual
   (`test/docs/hardware.md`), no un test automatizado.

@@ -128,6 +128,8 @@ impl ServerProbe {
     }
 }
 
+pub use shared::config::first_split_shard;
+
 /// Errors returned by [`LlamaManager`].
 #[derive(Debug, thiserror::Error)]
 pub enum LlmError {
@@ -222,6 +224,8 @@ impl LlamaManager {
     /// Builds the argv passed to `llama-server`. Pure function, unit-tested.
     pub fn build_args(config: &LlmConfig) -> Result<Vec<String>, LlmError> {
         let model = config.model.as_ref().ok_or(LlmError::ModelMissing)?;
+        let fixed = first_split_shard(model);
+        let model = &fixed;
         let model = model
             .to_str()
             .ok_or_else(|| LlmError::InvalidPath(model.clone()))?;
@@ -579,6 +583,11 @@ impl LlamaManager {
     }
 
     /// Returns the last `n` log lines, newest last.
+    /// OS pid of the managed child, if any.
+    pub fn pid(&self) -> Option<u32> {
+        self.child.as_ref().and_then(|child| child.id())
+    }
+
     pub fn last_logs(&self, n: usize) -> Vec<String> {
         let logs = self.logs.lock().unwrap_or_else(|error| error.into_inner());
         let skip = logs.len().saturating_sub(n);

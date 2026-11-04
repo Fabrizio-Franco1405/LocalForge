@@ -17,9 +17,9 @@ El workspace tiene un binario mínimo (`src/main.rs`) y crates con responsabilid
 - `crates/controller`: hilo del controlador (comandos, procesos, HTTP, generaciones, diagnóstico), muestreo CPU/RAM/VRAM (`system.rs`), hardware (`hardware.rs`) y biblioteca de GGUF (`models.rs`). Librería pura, sin GPUI.
 - `crates/shared`: contrato UI ⇄ motores, configuración, texto y resolución de rutas. Es hoja.
 - `crates/llm_engine`: `llama-server` gestionado y modo externo OpenAI (`/v1/models`, SSE).
-- `crates/stt`: wrapper de `whisper-cli`. **Stub (M2).**
-- `crates/tts`: wrapper de Kokoro. **Stub (M3).**
-- `crates/audio_engine`: captura, VAD y playback. **Stub (M2/M4).**
+- `crates/stt`: wrapper de `whisper-cli` (WAV 16 kHz, timeout, parser). **Implementado.**
+- `crates/tts`: Kokoro worker/comando externo + lectura WAV. **Implementado.**
+- `crates/audio_engine`: captura cpal, VAD WebRTC, endpointing y playback. **Implementado.**
 - `crates/scene3d`: motor 3D. **Stub (futuro).**
 - `crates/ui`: vista GPUI componentizada:
   - `app/mod.rs` — shell, `WorkspaceMode`, `SettingsTab`, pump y acciones.
@@ -37,9 +37,11 @@ El workspace tiene un binario mínimo (`src/main.rs`) y crates con responsabilid
 
 **Regla de frontera:** el core no importa GPUI. La UI consume `EngineCommand`/`EngineEvent`; sustituirla por JS/TS o Python es implementar ese protocolo, no tocar los motores. `test/tests/boundary.rs` lo verifica.
 
+**Regla de rendimiento:** nada pesado en el hilo de GPUI ni en el callback de audio. Escaneos, STT y TTS van a `spawn_blocking`/hilos; la captura usa un canal acotado y el callback solo convierte y reenvía. Para medir, usa `--release`.
+
 **Regla multiplataforma:** nada de `/proc` obligatorio, rutas POSIX asumidas ni `unsafe`. Usa `sysinfo`, `PathBuf`, `shared::tools::resolve_binary` (PATHEXT) y `rfd`. Linux, Windows 11 y macOS deben compilar y funcionar.
 
-Nota de estado: `llm_engine`, `shared`, `ui`, `controller` están implementados; `stt`, `tts`, `audio_engine` y `scene3d` compilan como placeholders con su contrato en el docstring. No añadas funcionalidad simulada: implementa el crate o deja el stub honesto.
+Nota de estado: `llm_engine`, `shared`, `ui`, `controller`, `stt`, `tts` y `audio_engine` están implementados; solo `scene3d` sigue como placeholder. No añadas funcionalidad simulada: implementa el crate o deja el stub honesto.
 
 ## 4. Stack Tecnológico y Documentación Oficial (Solo Vulkan)
 
@@ -77,7 +79,7 @@ Nota de estado: `llm_engine`, `shared`, `ui`, `controller` están implementados;
   - **Obligatorio:** Compilar `whisper.cpp` con `-DGGML_VULKAN=1`.
 
 ### 4.4 TTS: kokoro-onnx (CPU / ONNX Runtime)
-- **Estado:** pendiente (M3); `crates/tts` es un stub y `tools/` aún no existe.
+- **Estado:** implementado (`crates/tts` + `tools/kokoro_worker.py` + `tools/setup_kokoro.sh`).
 - **Repositorio:** https://github.com/xieren58/kokoro-onnx
 - **Modelo y Voces:** https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.0
 - **Voces disponibles:** https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md
@@ -104,7 +106,7 @@ Nota de estado: `llm_engine`, `shared`, `ui`, `controller` están implementados;
   `test/tests/`.
 - Para probar lógica privada, expón una API pública pequeña y documentada (ej.
   `shared::text::truncate_chars`, `ui::theme::parse_hex`), no dejes el test dentro del crate.
-- Comando: `cd test && cargo test` (55 tests; sin GPU, micrófono, modelos ni red externa).
+- Comando: `cd test && cargo test` (62 tests; sin GPU, micrófono, modelos ni red externa).
 - Lo que requiera hardware, modelos o latencia real va a `test/docs/hardware.md` como
   checklist manual, no como test automatizado.
 

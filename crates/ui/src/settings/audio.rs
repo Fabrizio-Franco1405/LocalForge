@@ -3,16 +3,20 @@
 //! Everything the voice pipeline needs lives in this single page, so the
 //! section is isolated from the LLM and 3D motors.
 
-use gpui_kit::component::setting::{SettingGroup, SettingItem, SettingPage};
+use gpui_kit::assets::IconName;
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::setting::{SettingField, SettingGroup, SettingItem, SettingPage};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _};
+use gpui_kit::*;
 
 use super::fields::*;
 
 /// Builds the audio section.
-pub fn page() -> SettingPage {
+pub fn page(devices: &crate::config::AudioDevices) -> SettingPage {
     SettingPage::new("Motor Audio")
         .description(
-            "Whisper.cpp para dictado, Kokoro/comando para voz y cpal para captura. \
-             Todo es opcional: sin motores de audio el chat sigue funcionando.",
+            "Whisper.cpp para reconocimiento de voz, Kokoro o un comando externo para síntesis \
+             y cpal para captura. Todos los motores de audio son opcionales.",
         )
         .default_open(true)
         .group(
@@ -141,7 +145,7 @@ pub fn page() -> SettingPage {
             .group(
                 SettingGroup::new()
                     .title("Preset Kokoro CLI")
-                    .description("Solo si ya tienes kokoro-onnx instalado en un entorno propio.")
+                    .description("Solo si kokoro-onnx ya está instalado en un entorno propio.")
                     .item(SettingItem::new(
                         "Intérprete Python",
                         text_field(
@@ -200,23 +204,26 @@ pub fn page() -> SettingPage {
                     .item(
                         SettingItem::new(
                             "Micrófono",
-                            text_field(
+                            device_dropdown(
+                                &devices.inputs,
                                 |cfg| cfg.audio.input_device.clone(),
                                 |cfg, value| cfg.audio.input_device = value,
                             ),
                         )
-                        .description("Vacío = dispositivo por defecto del sistema."),
+                        .description("Dispositivos detectados en el sistema. Vacío = predeterminado."),
                     )
                     .item(
                         SettingItem::new(
                             "Salida",
-                            text_field(
+                            device_dropdown(
+                                &devices.outputs,
                                 |cfg| cfg.audio.output_device.clone(),
                                 |cfg, value| cfg.audio.output_device = value,
                             ),
                         )
-                        .description("Vacío = dispositivo por defecto del sistema."),
+                        .description("Dispositivos detectados en el sistema. Vacío = predeterminado."),
                     )
+                    .item(refresh_devices_item())
                     .item(SettingItem::new(
                         "Frecuencia (Hz)",
                         number_field(
@@ -300,4 +307,60 @@ pub fn page() -> SettingPage {
                         .description("Requiere auriculares o cancelación de eco."),
                     ),
             )
+}
+
+fn device_dropdown<G, S>(devices: &[String], get: G, set: S) -> SettingField<SharedString>
+where
+    G: Fn(&shared::VoxConfig) -> String + 'static,
+    S: Fn(&mut shared::VoxConfig, String) + 'static,
+{
+    let mut options = vec![(
+        SharedString::from(""),
+        SharedString::from("(predeterminado del sistema)"),
+    )];
+    for device in devices {
+        options.push((
+            SharedString::from(device.clone()),
+            SharedString::from(device.clone()),
+        ));
+    }
+
+    SettingField::dropdown(
+        options,
+        move |cx: &App| SharedString::from(get(&crate::config::current(cx))),
+        move |value: SharedString, cx: &mut App| {
+            let value = value.to_string();
+            crate::config::update(cx, |cfg| set(cfg, value));
+        },
+    )
+}
+
+fn refresh_devices_item() -> SettingItem {
+    SettingItem::render(|_options, _window, cx| {
+        let theme = cx.theme();
+        gpui_kit::div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                Button::new("refresh-audio-devices")
+                    .small()
+                    .ghost()
+                    .icon(IconName::RefreshCw)
+                    .label("Actualizar dispositivos")
+                    .on_click(|_, _, cx| {
+                        if let Some(engine) = crate::config::engine(cx) {
+                            engine.send(shared::EngineCommand::ScanAudioDevices);
+                        }
+                    }),
+            )
+            .child(
+                gpui_kit::div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(
+                        "La lista se actualiza al iniciar la aplicación y al pulsar este botón.",
+                    ),
+            )
+    })
 }

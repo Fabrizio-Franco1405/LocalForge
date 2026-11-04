@@ -8,7 +8,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use shared::{DiagnosticItem, VoxConfig};
-use sysinfo::System;
+use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 
 /// Collects a hardware report.
 pub async fn collect(config: &VoxConfig) -> Vec<DiagnosticItem> {
@@ -46,7 +46,11 @@ pub async fn collect(config: &VoxConfig) -> Vec<DiagnosticItem> {
 }
 
 fn base_items() -> Vec<DiagnosticItem> {
-    let system = System::new_all();
+    let system = System::new_with_specifics(
+        RefreshKind::new()
+            .with_cpu(CpuRefreshKind::everything())
+            .with_memory(MemoryRefreshKind::everything()),
+    );
     let os = match (System::name(), System::os_version()) {
         (Some(name), Some(version)) => format!("{name} {version}"),
         (Some(name), None) => name,

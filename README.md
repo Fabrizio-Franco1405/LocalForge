@@ -60,9 +60,9 @@ La suite de pruebas verifica esa frontera.
 - [x] UI por secciones con iconos: sidebar LLM/Audio/3D/Ajustes, chat, diagnóstico y temas
 - [x] Monitor de CPU/RAM de la app y del host en tiempo real (muestreado en el core)
 - [x] Encender / apagar / reiniciar el motor local desde la cabecera
-- [ ] STT con `whisper-cli` (`stt`) — stub documentado, hito M2
-- [ ] TTS Kokoro ONNX (`tts`) — stub documentado, hito M3
-- [ ] Captura, VAD y playback (`audio_engine`) — stub documentado, hitos M2/M4
+- [x] STT con `whisper-cli` (`stt`): WAV 16 kHz, timeout, parser tolerante
+- [x] TTS Kokoro ONNX (`tts`): worker `tools/kokoro_worker.py`, comando externo y WAV 24 kHz
+- [x] Captura cpal, VAD WebRTC, endpointing y playback (`audio_engine`)
 - [ ] Motor 3D (`scene3d`) — stub, sin fecha
 - [ ] Conversación manos libres completa (barge-in, streaming TTS)
 - [ ] Empaquetado e instaladores
@@ -122,11 +122,16 @@ curl -L -o assets/models/whisper/ggml-small.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
 ```
 
-### 4. Kokoro (TTS) — pendiente (M3)
+### 4. Kokoro (TTS)
 
-Todavía no hay worker de TTS: `tools/kokoro_worker.py` y `tools/setup_kokoro.sh`
-se crearán con el hito M3. La app funciona sin ellos; el backend `tts` es un
-stub documentado y la UI lo muestra como deshabilitado.
+```bash
+./tools/setup_kokoro.sh
+```
+
+Crea `.venv-kokoro/` con `kokoro-onnx` (ONNX Runtime CPU, sin PyTorch) y descarga
+`kokoro-v1.0.int8.onnx` + `voices-v1.0.bin` en `assets/models/kokoro/`. Después
+configura en **Ajustes → Motor Audio**: Python (`.venv-kokoro/bin/python`),
+worker (`tools/kokoro_worker.py`), carpeta del modelo y voz (`ef_dora`).
 
 ### 5. Ejecutar
 
@@ -160,7 +165,7 @@ La suite vive en `test/`, es un crate propio **fuera del workspace** y está
 ignorada por git: el repositorio solo versiona el código de la app.
 
 ```bash
-cd test && cargo test        # 55 tests: shared, llm_engine, system, ui, controller, boundary
+cd test && cargo test        # 62 tests: shared, llm_engine, system, audio, ui, controller, boundary
 ```
 
 No necesita GPU, micrófono ni modelos. El detalle (cobertura, fixtures y
@@ -182,3 +187,19 @@ Las skills locales viven en `.agents/skills/` y son la guía operativa del proye
 ## Licencia
 
 MIT OR Apache-2.0
+
+## Rendimiento
+
+- Para uso real compila en release: `cargo run --release`. El perfil incluye
+  `lto = "thin"`, `codegen-units = 1` y `strip`; el build de debug es mucho más
+  lento y no representa el rendimiento final.
+- La app ronda los **200 MB**. El footer muestra `LLM X MB`: esa es la memoria
+  del proceso `llama-server`.
+- Ver 13 GB de RAM usada con un 8B Q4 no es la UI: es el modelo + KV cache. En
+  8 GB de VRAM, un 8B con `-ngl 99` y `ctx 32768` hace swap y arrastra todo el
+  sistema. Usa `ctx 4096–8192` y `-ngl 24–32`, o un 4B Q4_K_M.
+- El escaneo de modelos corre en `spawn_blocking`, el muestreo de recursos en su
+  propia tarea y la captura de audio en un hilo con callback sin locks: nada de
+  eso bloquea el hilo de GPUI.
+- La biblioteca de modelos busca por defecto en `~/.cache/huggingface/hub`
+  cuando no hay carpeta configurada, recorriendo `models--*/snapshots/*/`.

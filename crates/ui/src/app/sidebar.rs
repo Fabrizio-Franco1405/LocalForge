@@ -107,7 +107,7 @@ impl VoxApp {
                 div()
                     .text_xs()
                     .text_color(theme.muted_foreground)
-                    .child("harness local · LLM · voz · 3D"),
+                    .child("entorno local · LLM · voz · 3D"),
             )
     }
 

@@ -7,6 +7,9 @@ license.workspace = true
 [dependencies]
 shared = { workspace = true }
 llm_engine = { workspace = true }
+audio_engine = { workspace = true }
+stt = { workspace = true }
+tts = { workspace = true }
 crossbeam-channel = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

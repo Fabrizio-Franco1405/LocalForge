@@ -1,0 +1,4 @@
+[build]
+# Reutiliza el target del proyecto para no recompilar GPUI en un directorio
+# aparte. Este archivo vive dentro de test/ (ignorado por git).
+target-dir = "../target"

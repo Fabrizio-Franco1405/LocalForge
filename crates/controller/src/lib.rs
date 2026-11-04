@@ -12,10 +12,12 @@ pub mod hardware;
 pub mod models;
 pub mod system;
 
+use std::net::ToSocketAddrs;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
+use audio_engine::{AudioCapture, AudioEvent};
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use llm_engine::{ChatDelta, ChatMessage, LlamaManager, ServerProbe};
 use shared::text::truncate_chars;
@@ -29,6 +31,11 @@ use tokio::sync::mpsc;
 /// Completion notices produced by background stream readers.
 enum Internal {
     ReplyFinished { generation: u64, text: String },
+    SpeechEnd(Vec<f32>),
+    Transcript(String),
+    SttError(String),
+    TtsDone,
+    TtsError(String),
 }
 
 struct Controller {
@@ -47,6 +54,10 @@ struct Controller {
     history: Vec<ChatMessage>,
     streaming: Option<u64>,
     active: Arc<AtomicU64>,
+    llm_pid: Arc<AtomicU32>,
+    capture: Option<AudioCapture>,
+    transcribing: bool,
+    tts_busy: bool,
 }
 
 /// Starts the controller and returns the handle used by the UI.
@@ -97,6 +108,10 @@ impl Controller {
             history: Vec::new(),
             streaming: None,
             active: Arc::new(AtomicU64::new(0)),
+            llm_pid: Arc::new(AtomicU32::new(0)),
+            capture: None,
+            transcribing: false,
+            tts_busy: false,
         }
     }
 
@@ -107,12 +122,15 @@ impl Controller {
         // large model is still loading and `refresh` is blocked.
         {
             let events = self.events.clone();
+            let llm_pid = Arc::clone(&self.llm_pid);
             tokio::spawn(async move {
                 let mut sampler = SystemSampler::new();
                 let mut ticker = tokio::time::interval(Duration::from_secs(2));
                 loop {
                     ticker.tick().await;
                     let usage = sampler.sample();
+                    let pid = llm_pid.load(Ordering::Relaxed);
+                    let llm_mb = (pid != 0).then(|| sampler.process_mb(pid)).flatten();
                     let event = EngineEvent::SystemUsage {
                         cpu_percent: usage.cpu_percent,
                         ram_total_mb: usage.ram_total_mb,
@@ -120,6 +138,7 @@ impl Controller {
                         app_mb: usage.app_mb,
                         vram_used_mb: usage.vram_used_mb,
                         vram_total_mb: usage.vram_total_mb,
+                        llm_mb,
                     };
                     if events.send(event).is_err() {
                         break;
@@ -202,6 +221,118 @@ impl Controller {
     }
 
     /// Applies the current config to the manager, keeping the resolved model id.
+    /// Synthesizes and plays the reply when TTS is configured.
+    fn maybe_speak(&mut self, text: String) {
+        if self.tts_busy
+            || self.config.tts.backend == TtsBackend::Disabled
+            || text.trim().is_empty()
+        {
+            return;
+        }
+
+        self.tts_busy = true;
+        let config = self.config.tts.clone();
+        let events = self.events.clone();
+        let internal = self.internal_tx.clone();
+
+        tokio::spawn(async move {
+            let _ = events.send(EngineEvent::Speaking(true));
+            let result = tokio::task::spawn_blocking(move || -> Result<(), String> {
+                let audio = tts::synthesize(&config, &text).map_err(|error| error.to_string())?;
+                audio_engine::play(&audio.samples, audio.sample_rate, 1.0)
+                    .map_err(|error| error.to_string())
+            })
+            .await;
+
+            let _ = events.send(EngineEvent::Speaking(false));
+
+            match result {
+                Ok(Ok(())) => {
+                    let _ = internal.send(Internal::TtsDone);
+                }
+                Ok(Err(error)) => {
+                    let _ = internal.send(Internal::TtsError(error));
+                }
+                Err(error) => {
+                    let _ = internal.send(Internal::TtsError(format!("tarea TTS: {error}")));
+                }
+            }
+        });
+    }
+
+    fn start_capture(&mut self) {
+        if self.capture.is_some() {
+            return;
+        }
+
+        let events = self.events.clone();
+        let internal = self.internal_tx.clone();
+        let result = audio_engine::start(&self.config.audio, move |event| match event {
+            AudioEvent::Level(level) => {
+                let _ = events.send(EngineEvent::SpeechLevel(level));
+            }
+            AudioEvent::SpeechStart => {}
+            AudioEvent::SpeechEnd(samples) => {
+                let _ = internal.send(Internal::SpeechEnd(samples));
+            }
+        });
+
+        match result {
+            Ok(capture) => self.capture = Some(capture),
+            Err(error) => self.emit_error("audio", error.to_string()),
+        }
+    }
+
+    fn stop_capture(&mut self) {
+        if self.capture.take().is_some() {
+            self.emit(EngineEvent::SpeechLevel(0.0));
+        }
+    }
+
+    fn on_speech_end(&mut self, samples: Vec<f32>) {
+        if self.transcribing {
+            return;
+        }
+        if !self.config.stt.enabled {
+            return;
+        }
+        if self.config.stt.model.is_none() {
+            self.emit_error(
+                "stt",
+                "Dictado activo pero sin modelo de Whisper configurado.",
+            );
+            return;
+        }
+
+        self.transcribing = true;
+        let cfg = self.config.stt.clone();
+        let tx = self.internal_tx.clone();
+
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                stt::WhisperCli::new(&cfg).transcribe(&samples)
+            })
+            .await;
+
+            match result {
+                Ok(Ok(transcript)) => {
+                    let _ = tx.send(Internal::Transcript(transcript.text));
+                }
+                Ok(Err(error)) => {
+                    let _ = tx.send(Internal::SttError(error.to_string()));
+                }
+                Err(error) => {
+                    let _ = tx.send(Internal::SttError(format!("tarea STT: {error}")));
+                }
+            }
+        });
+    }
+
+    fn sync_llm_pid(&self) {
+        let pid = self.llm.as_ref().and_then(LlamaManager::pid).unwrap_or(0);
+        self.llm_pid.store(pid, Ordering::Relaxed);
+    }
+
     fn sync_manager_config(&mut self) {
         if let Some(manager) = self.llm.as_mut() {
             let mut config = self.config.llm.clone();
@@ -239,6 +370,7 @@ impl Controller {
             return;
         }
         self.sync_manager_config();
+        self.sync_llm_pid();
 
         let probe = match self.llm.as_ref() {
             Some(manager) => manager.probe().await,
@@ -371,6 +503,7 @@ impl Controller {
     /// Probing pass while idle: detects external servers, child exits and
     /// servers that went away.
     async fn tick(&mut self) {
+        self.sync_llm_pid();
         if let Some(manager) = self.llm.as_mut()
             && let Some((code, logs)) = manager.poll_exit()
         {
@@ -454,12 +587,41 @@ impl Controller {
         probe
     }
 
+    /// Waits until the managed port stops accepting connections.
+    ///
+    /// A model swap must not probe the old server: otherwise the controller
+    /// would see `Ready`, skip the spawn and keep the previous model.
+    async fn wait_local_port_free(&self) {
+        if !self.config.llm.is_managed() {
+            return;
+        }
+
+        let host = match self.config.llm.host.as_str() {
+            "0.0.0.0" | "::" | "[::]" => "127.0.0.1",
+            other => other,
+        };
+        let Ok(mut addrs) = (host, self.config.llm.port).to_socket_addrs() else {
+            return;
+        };
+        let Some(addr) = addrs.next() else {
+            return;
+        };
+
+        for _ in 0..40 {
+            if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(120)).is_err() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
     async fn stop_child(&mut self) {
         if let Some(mut manager) = self.llm.take() {
             manager.stop().await;
         }
         self.active.store(0, Ordering::Relaxed);
         self.streaming = None;
+        self.llm_pid.store(0, Ordering::Relaxed);
     }
 
     async fn handle(&mut self, command: EngineCommand) -> bool {
@@ -481,7 +643,8 @@ impl Controller {
                 self.config = *config;
                 self.resolved_model.clear();
                 self.llm = None;
-                self.scan_models();
+                self.wait_local_port_free().await;
+                self.scan_models().await;
                 self.refresh(true).await;
             }
             EngineCommand::ProbeLlm => {
@@ -512,16 +675,21 @@ impl Controller {
                     );
                 }
             }
-            EngineCommand::SetListening(_) => {
-                self.emit_error(
-                    "audio",
-                    "La captura de audio aún no está conectada en esta compilación.",
-                );
+            EngineCommand::SetListening(listening) => {
+                if listening {
+                    self.start_capture();
+                } else {
+                    self.stop_capture();
+                }
             }
             EngineCommand::ProbeTools => self.emit_diagnostics().await,
             EngineCommand::ProbeHardware => self.emit_hardware().await,
-            EngineCommand::ScanModels => self.scan_models(),
-            EngineCommand::Shutdown => return false,
+            EngineCommand::ScanModels => self.scan_models().await,
+            EngineCommand::ScanAudioDevices => self.emit_audio_devices(),
+            EngineCommand::Shutdown => {
+                self.stop_capture();
+                return false;
+            }
         }
 
         true
@@ -626,6 +794,28 @@ impl Controller {
 
     fn handle_internal(&mut self, internal: Internal) {
         match internal {
+            Internal::SpeechEnd(samples) => self.on_speech_end(samples),
+            Internal::Transcript(text) => {
+                self.transcribing = false;
+                let text = text.trim().to_owned();
+                if !text.is_empty() {
+                    self.emit(EngineEvent::Transcript {
+                        generation: 0,
+                        text,
+                    });
+                }
+            }
+            Internal::SttError(message) => {
+                self.transcribing = false;
+                self.emit_error("stt", message);
+            }
+            Internal::TtsDone => {
+                self.tts_busy = false;
+            }
+            Internal::TtsError(message) => {
+                self.tts_busy = false;
+                self.emit_error("tts", message);
+            }
             Internal::ReplyFinished { generation, text } => {
                 if !text.trim().is_empty() {
                     self.history.push(ChatMessage::assistant(text.clone()));
@@ -641,20 +831,33 @@ impl Controller {
 
                 self.streaming = None;
                 self.active.store(0, Ordering::Relaxed);
-                self.emit(EngineEvent::ReplyDone { generation, text });
+                self.emit(EngineEvent::ReplyDone {
+                    generation,
+                    text: text.clone(),
+                });
+                self.maybe_speak(text);
             }
         }
     }
 
-    /// Scans the configured folder and publishes the model library.
-    fn scan_models(&mut self) {
+    fn emit_audio_devices(&self) {
+        let devices = audio_engine::scan_devices();
+        self.emit(EngineEvent::AudioDevices {
+            inputs: devices.inputs,
+            outputs: devices.outputs,
+        });
+    }
+
+    /// Scans the configured folder (or the Hugging Face cache) off the
+    /// controller thread and publishes the model library.
+    async fn scan_models(&mut self) {
         let dir = self
             .config
             .llm
-            .models_dir
-            .clone()
-            .unwrap_or_else(|| self.config.assets_dir().join("models").join("llm"));
-        let entries = models::scan(&dir);
+            .effective_models_dir(&self.config.assets_dir());
+        let entries = tokio::task::spawn_blocking(move || models::scan(&dir))
+            .await
+            .unwrap_or_default();
         self.emit(EngineEvent::Models { entries });
     }
 

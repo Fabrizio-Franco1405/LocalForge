@@ -275,6 +275,24 @@ impl LlmConfig {
         }
     }
 
+    /// Folder to scan for models.
+    ///
+    /// Order: configured `models_dir`, then the Hugging Face cache (the layout
+    /// `models--org--name/snapshots/<hash>/file.gguf` is walked recursively),
+    /// then `assets/models/llm`.
+    pub fn effective_models_dir(&self, assets_dir: &std::path::Path) -> PathBuf {
+        if let Some(dir) = self.models_dir.clone() {
+            return dir;
+        }
+        if let Some(cache) = dirs::cache_dir() {
+            let hub = cache.join("huggingface").join("hub");
+            if hub.is_dir() {
+                return hub;
+            }
+        }
+        assets_dir.join("models").join("llm")
+    }
+
     /// Whether LocalForge owns the process.
     pub fn is_managed(&self) -> bool {
         self.mode == LlmMode::Managed
@@ -534,6 +552,33 @@ pub struct PathsConfig {
     pub assets_dir: Option<PathBuf>,
     /// Directory for logs and sessions.
     pub data_dir: Option<PathBuf>,
+}
+
+/// If `path` is a non-first split GGUF shard, returns the first shard when it
+/// exists. llama.cpp only loads a split model through its first file.
+pub fn first_split_shard(path: &Path) -> PathBuf {
+    let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) else {
+        return path.to_path_buf();
+    };
+    let Some((prefix, total)) = name.rsplit_once("-of-") else {
+        return path.to_path_buf();
+    };
+    let Some((base, index)) = prefix.rsplit_once('-') else {
+        return path.to_path_buf();
+    };
+    let Ok(index) = index.parse::<u32>() else {
+        return path.to_path_buf();
+    };
+    if index <= 1 {
+        return path.to_path_buf();
+    }
+
+    let candidate = path.with_file_name(format!("{base}-00001-of-{total}.gguf"));
+    if candidate.is_file() {
+        candidate
+    } else {
+        path.to_path_buf()
+    }
 }
 
 /// Configuration errors.

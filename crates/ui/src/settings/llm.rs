@@ -19,8 +19,8 @@ use super::fields::*;
 pub fn page(mode: LlmMode, cfg: &VoxConfig, models: &[ModelEntry]) -> SettingPage {
     let page = SettingPage::new("Motor LLM")
         .description(
-            "Conecta tu llama.cpp local o cualquier servidor compatible con OpenAI. \
-             LocalForge no descarga modelos ni binarios.",
+            "Configure el binario, el modelo y los parámetros del motor local, o un endpoint \
+             compatible con OpenAI. LocalForge no descarga modelos ni binarios.",
         )
         .default_open(true)
         .group(connection_group(mode));
@@ -46,8 +46,8 @@ fn connection_group(mode: LlmMode) -> SettingGroup {
             ),
         )
         .description(
-            "Local: LocalForge arranca tu llama-server. Externo: solo se conecta a uno ya \
-             encendido (Ollama, LM Studio, llama.cpp, gateway…).",
+            "Local: LocalForge inicia y supervisa el proceso local. Externo: conexión a un \
+             servidor ya iniciado (Ollama, LM Studio, llama.cpp, pasarela…).",
         ),
     );
 
@@ -61,7 +61,7 @@ fn connection_group(mode: LlmMode) -> SettingGroup {
                         |cfg, value| cfg.llm.binary = value.trim().into(),
                     ),
                 )
-                .description("Nombre en PATH o ruta absoluta a tu compilación Vulkan.")
+                .description("Nombre en PATH o ruta absoluta a la compilación Vulkan.")
                 .layout(Axis::Vertical),
             )
             .item(path_picker(
@@ -257,7 +257,7 @@ fn generation_group() -> SettingGroup {
 fn library_group(cfg: &VoxConfig, models: &[ModelEntry]) -> SettingGroup {
     let group = SettingGroup::new()
         .title("Biblioteca de modelos")
-        .description("Escanéa una carpeta con tus .gguf y elige por alias; la ruta manual sigue disponible como salvavidas.")
+        .description("Seleccione una carpeta con archivos .gguf y asigne un alias a cada modelo. La ruta manual permanece disponible como alternativa.")
         .item(
             SettingItem::new(
                 "Carpeta de modelos",
@@ -284,7 +284,7 @@ fn library_group(cfg: &VoxConfig, models: &[ModelEntry]) -> SettingGroup {
                 SettingField::render(|_, _, _| {
                     gpui_kit::div()
                         .text_xs()
-                        .child("Sin modelos todavía: elige la carpeta y pulsa «Escanear».")
+                        .child("Sin modelos: seleccione la carpeta y pulse «Escanear».")
                 }),
             )
             .description("La lista se rellena tras escanear la carpeta."),
@@ -305,63 +305,84 @@ fn library_group(cfg: &VoxConfig, models: &[ModelEntry]) -> SettingGroup {
         ));
     }
 
-    group
-        .item(
-            SettingItem::new(
-                "Modelo instalado",
-                SettingField::dropdown(
-                    options,
-                    {
-                        let models = models.to_vec();
-                        move |cx: &App| {
-                            let cfg = crate::config::current(cx);
-                            cfg.llm
-                                .model
-                                .as_ref()
-                                .map(|path| SharedString::from(path.display().to_string()))
-                                .unwrap_or_else(|| {
-                                    models
-                                        .first()
-                                        .map(|entry| SharedString::from(entry.path.clone()))
-                                        .unwrap_or_default()
-                                })
-                        }
-                    },
-                    |value: SharedString, cx: &mut App| {
-                        let path = std::path::PathBuf::from(value.to_string());
-                        crate::config::update(cx, |cfg| {
-                            let stem = path
-                                .file_stem()
-                                .and_then(|stem| stem.to_str())
-                                .unwrap_or("modelo")
-                                .to_owned();
-                            cfg.llm
-                                .model_aliases
-                                .entry(path.display().to_string())
-                                .or_insert(stem);
-                            cfg.llm.model = Some(path);
-                            cfg.llm.model_id.clear();
-                        });
-                    },
-                ),
-            )
-            .description("Cambiar aquí y pulsar Aplicar reinicia llama-server con ese GGUF."),
-        )
-        .item(
-            SettingItem::new(
-                "Alias del modelo",
-                text_field(current_alias, |cfg, value| {
-                    if let Some(path) = cfg.llm.model.clone() {
+    let mut group = group.item(
+        SettingItem::new(
+            "Modelo instalado",
+            SettingField::dropdown(
+                options,
+                {
+                    let models = models.to_vec();
+                    move |cx: &App| {
+                        let cfg = crate::config::current(cx);
+                        cfg.llm
+                            .model
+                            .as_ref()
+                            .map(|path| SharedString::from(path.display().to_string()))
+                            .unwrap_or_else(|| {
+                                models
+                                    .first()
+                                    .map(|entry| SharedString::from(entry.path.clone()))
+                                    .unwrap_or_default()
+                            })
+                    }
+                },
+                |value: SharedString, cx: &mut App| {
+                    let path = std::path::PathBuf::from(value.to_string());
+                    crate::config::update(cx, |cfg| {
+                        let stem = path
+                            .file_stem()
+                            .and_then(|stem| stem.to_str())
+                            .unwrap_or("modelo")
+                            .to_owned();
                         cfg.llm
                             .model_aliases
-                            .insert(path.display().to_string(), value.trim().to_owned());
-                    }
-                }),
-            )
-            .description(
-                "Nombre corto que verás en Ajustes y en el chat; el archivo real no cambia.",
+                            .entry(path.display().to_string())
+                            .or_insert(stem);
+                        cfg.llm.model = Some(path);
+                        cfg.llm.model_id.clear();
+                    });
+                },
             ),
         )
+        .description("Al cambiar y pulsar Aplicar se detiene el motor actual y se carga el modelo seleccionado."),
+    );
+
+    group = group.title("Biblioteca de modelos");
+
+    for entry in models {
+        let path = entry.path.clone();
+        let name = entry.name.clone();
+        group = group.item(
+            SettingItem::new(name.clone(), model_alias_field(path.clone(), name))
+                .description(format!("Nombre visible · ruta original: {path}"))
+                .layout(Axis::Vertical),
+        );
+    }
+
+    group
+}
+
+fn model_alias_field(path: String, fallback: String) -> SettingField<SharedString> {
+    let get_path = path.clone();
+    SettingField::input(
+        move |cx: &App| {
+            let cfg = crate::config::current(cx);
+            cfg.llm
+                .model_aliases
+                .get(&get_path)
+                .filter(|alias| !alias.trim().is_empty())
+                .cloned()
+                .map(SharedString::from)
+                .unwrap_or_else(|| SharedString::from(fallback.clone()))
+        },
+        move |value: SharedString, cx: &mut App| {
+            let value = value.trim().to_owned();
+            let path = path.clone();
+            crate::config::update(cx, |cfg| {
+                cfg.llm.model_aliases.insert(path.clone(), value);
+            });
+        },
+    )
 }
 
 fn scan_button() -> SettingItem {
@@ -387,7 +408,7 @@ fn scan_button() -> SettingItem {
                 gpui_kit::div()
                     .text_xs()
                     .text_color(theme.muted_foreground)
-                    .child("También se escanea al aplicar cambios."),
+                    .child("El escaneo también se ejecuta al aplicar cambios."),
             )
     })
 }
@@ -399,20 +420,4 @@ fn model_label(cfg: &VoxConfig, entry: &ModelEntry) -> String {
         .filter(|alias| !alias.trim().is_empty())
         .cloned()
         .unwrap_or_else(|| entry.name.clone())
-}
-
-fn current_alias(cfg: &VoxConfig) -> String {
-    let Some(path) = cfg.llm.model.as_ref() else {
-        return String::new();
-    };
-    cfg.llm
-        .model_aliases
-        .get(&path.display().to_string())
-        .cloned()
-        .unwrap_or_else(|| {
-            path.file_stem()
-                .and_then(|stem| stem.to_str())
-                .unwrap_or("modelo")
-                .to_owned()
-        })
 }

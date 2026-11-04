@@ -70,7 +70,7 @@ impl VoxApp {
                                 .p_4()
                                 .text_sm()
                                 .text_color(theme.muted_foreground)
-                                .child("Pulsa «Actualizar» para inspeccionar el equipo."),
+                                .child("Seleccione «Actualizar» para inspeccionar el equipo."),
                         )
                     })
                     .children(hardware.iter().map(|item| hardware_card(item, cx))),
@@ -128,7 +128,7 @@ impl VoxApp {
                                 .p_4()
                                 .text_sm()
                                 .text_color(theme.muted_foreground)
-                                .child("Pulsa «Comprobar» para validar binarios y modelos."),
+                                .child("Seleccione «Comprobar» para validar binarios y modelos."),
                         )
                     })
                     .children(diagnostics.iter().map(|item| diagnostic_row(item, cx))),

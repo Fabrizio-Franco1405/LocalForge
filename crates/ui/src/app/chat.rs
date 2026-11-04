@@ -80,7 +80,7 @@ impl VoxApp {
                                     .text_xs()
                                     .font_semibold()
                                     .text_color(theme.primary)
-                                    .child("100% LOCAL · BYO ENGINES"),
+                                    .child("ENTORNO LOCAL · COMPONENTES PROPIOS"),
                             )
                             .child(
                                 div()
@@ -103,15 +103,15 @@ impl VoxApp {
                                     .text_2xl()
                                     .font_semibold()
                                     .text_color(theme.foreground)
-                                    .child("Tu LLM, tu voz, tu 3D. En tu máquina."),
+                                    .child("Lenguaje, voz y 3D en el equipo local."),
                             )
                             .child(
                                 div()
                                     .text_sm()
                                     .text_color(theme.muted_foreground)
                                     .child(
-                                        "LocalForge no descarga ni instala nada: conecta tu llama.cpp, tu whisper.cpp \
-                                         y tu TTS, y añade motores nuevos sin cambiar la app.",
+                                        "LocalForge no descarga ni instala componentes: utiliza los binarios y modelos \
+                                         instalados por el usuario. Permite conectar motores de lenguaje, voz y 3D sin servicios externos.",
                                     ),
                             ),
                     )
@@ -172,20 +172,20 @@ impl VoxApp {
                     .w_full()
                     .child(feature_card(
                         "1",
-                        "Conecta",
-                        "Local abre tu llama.cpp y tu GGUF; Externo se conecta a Ollama, LM Studio o un llama-server ya encendido. Cada modo muestra solo sus campos.",
+                        "Conexión",
+                        "El modo Local carga automáticamente el motor instalado; el modo Externo se conecta a un servidor ya iniciado. Cada modo muestra únicamente sus campos.",
                         cx,
                     ))
                     .child(feature_card(
                         "2",
-                        "Comprueba",
-                        "Aplicar y Reiniciar vuelven a leer la configuración y a probar el puerto. Herramientas muestra qué rutas ve y qué falta.",
+                        "Verificación",
+                        "Las acciones Aplicar y Reiniciar releen la configuración y verifican el puerto. El panel Sistema muestra las rutas detectadas y los componentes que faltan.",
                         cx,
                     ))
                     .child(feature_card(
                         "3",
-                        "Conversa",
-                        "El chat funciona sin STT ni TTS. Cuando conectes Whisper y tu motor de voz, el mismo flujo se vuelve manos libres. El motor 3D llegará con su propia sección.",
+                        "Conversación",
+                        "El chat funciona sin STT ni TTS. Al conectar Whisper y un motor de voz, el flujo incorpora la conversación hablada. El motor 3D se integrará en su propia sección.",
                         cx,
                     )),
             )
@@ -597,7 +597,7 @@ impl VoxApp {
                                     .py_3()
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
-                                    .child("Sin modelos: configura una carpeta en Ajustes → Motor LLM."),
+                                    .child("Sin modelos: seleccione una carpeta en Ajustes → Motor LLM."),
                             )
                         })
                         .children(rows),

@@ -7,7 +7,7 @@
 
 use std::process::Command;
 
-use sysinfo::{Pid, ProcessesToUpdate, System};
+use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Pid, ProcessesToUpdate, RefreshKind, System};
 
 /// One resource sample.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -24,6 +24,8 @@ pub struct SystemUsage {
     pub vram_used_mb: Option<u64>,
     /// Total GPU memory, in MiB.
     pub vram_total_mb: Option<u64>,
+    /// Resident memory of `llama-server`, when it is running.
+    pub llm_mb: Option<u64>,
 }
 
 /// Stateful sampler. CPU values need a previous sample to compute a delta.
@@ -43,7 +45,13 @@ impl Default for SystemSampler {
 impl SystemSampler {
     /// Creates a sampler and primes CPU counters.
     pub fn new() -> Self {
-        let mut system = System::new_all();
+        // Only CPU + memory: `new_all()` would enumerate every process on
+        // startup, which is needlessly expensive.
+        let mut system = System::new_with_specifics(
+            RefreshKind::new()
+                .with_cpu(CpuRefreshKind::everything())
+                .with_memory(MemoryRefreshKind::everything()),
+        );
         system.refresh_cpu_usage();
         system.refresh_memory();
 
@@ -86,7 +94,18 @@ impl SystemSampler {
             app_mb,
             vram_used_mb,
             vram_total_mb,
+            llm_mb: None,
         }
+    }
+
+    /// Resident memory (MiB) of another process, refreshed on demand.
+    pub fn process_mb(&mut self, pid: u32) -> Option<u64> {
+        let pid = Pid::from_u32(pid);
+        self.system
+            .refresh_processes(ProcessesToUpdate::Some(&[pid]));
+        self.system
+            .process(pid)
+            .map(|process| process.memory() / (1024 * 1024))
     }
 }
 

@@ -22,13 +22,14 @@ use crate::config;
 pub fn view(cx: &App, tab: SettingsTab) -> impl IntoElement {
     let cfg = config::current(cx);
     let models = config::models(cx);
+    let devices = config::audio_devices(cx);
 
     let (id, pages) = match tab {
         SettingsTab::Llm => (
             "localforge-settings-llm",
             vec![llm::page(cfg.llm.mode, &cfg, &models)],
         ),
-        SettingsTab::Audio => ("localforge-settings-audio", vec![audio::page()]),
+        SettingsTab::Audio => ("localforge-settings-audio", vec![audio::page(&devices)]),
         SettingsTab::Scene3d => ("localforge-settings-scene3d", vec![scene3d::page()]),
         SettingsTab::General | SettingsTab::System => {
             ("localforge-settings-general", vec![general::page()])

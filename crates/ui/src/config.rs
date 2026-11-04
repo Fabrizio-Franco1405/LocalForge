@@ -57,6 +57,28 @@ impl GlobalConfig {
 pub fn init(cx: &mut App, config: VoxConfig, path: PathBuf) {
     cx.set_global(GlobalConfig::new(config, path));
     cx.set_global(ModelLibrary::default());
+    cx.set_global(AudioDevices::default());
+}
+
+/// Audio devices reported by the controller.
+#[derive(Clone, Default)]
+pub struct AudioDevices {
+    /// Microphone names.
+    pub inputs: Vec<String>,
+    /// Speaker names.
+    pub outputs: Vec<String>,
+}
+
+impl Global for AudioDevices {}
+
+/// Latest device list.
+pub fn audio_devices(cx: &App) -> AudioDevices {
+    cx.try_global::<AudioDevices>().cloned().unwrap_or_default()
+}
+
+/// Replaces the device list.
+pub fn set_audio_devices(cx: &mut App, inputs: Vec<String>, outputs: Vec<String>) {
+    cx.set_global(AudioDevices { inputs, outputs });
 }
 
 /// Models discovered by the controller.
