@@ -1,0 +1,492 @@
+//! Configuration model for VoxLocal.
+//!
+//! Every section has sensible defaults and is optional in the TOML file, so a
+//! partial configuration keeps working across releases. Environment variables
+//! use the `VOXLOCAL_` prefix and `__` as the nesting separator:
+//!
+//! ```text
+//! VOXLOCAL_LLM__PORT=9940
+//! VOXLOCAL_AUDIO__VAD__MIN_SILENCE_MS=800
+//! ```
+
+use std::path::{Path, PathBuf};
+
+use figment::providers::Format as _;
+use serde::{Deserialize, Serialize};
+
+/// Root configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VoxConfig {
+    /// Text generation engine (llama.cpp).
+    pub llm: LlmConfig,
+    /// Speech-to-text engine (whisper.cpp).
+    pub stt: SttConfig,
+    /// Text-to-speech engine (Kokoro ONNX).
+    pub tts: TtsConfig,
+    /// Capture, playback and voice activity detection.
+    pub audio: AudioConfig,
+    /// Desktop user interface.
+    pub ui: UiConfig,
+    /// Filesystem locations.
+    pub paths: PathsConfig,
+}
+
+impl Default for VoxConfig {
+    fn default() -> Self {
+        Self {
+            llm: LlmConfig::default(),
+            stt: SttConfig::default(),
+            tts: TtsConfig::default(),
+            audio: AudioConfig::default(),
+            ui: UiConfig::default(),
+            paths: PathsConfig::default(),
+        }
+    }
+}
+
+impl VoxConfig {
+    /// Loads the configuration from `path`.
+    ///
+    /// A missing file is not an error: it yields the defaults.
+    pub fn load(path: &Path) -> Result<Self, ConfigError> {
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+
+        figment::Figment::new()
+            .merge(figment::providers::Toml::file(path))
+            .merge(figment::providers::Env::prefixed("VOXLOCAL_").split("__"))
+            .extract()
+            .map_err(ConfigError::Invalid)
+    }
+
+    /// Saves the configuration as pretty TOML, creating parent directories.
+    pub fn save(&self, path: &Path) -> Result<(), ConfigError> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| ConfigError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+
+        let rendered =
+            toml::to_string_pretty(self).map_err(|error| ConfigError::Serialize(error.to_string()))?;
+
+        std::fs::write(path, rendered).map_err(|source| ConfigError::Io {
+            path: path.to_path_buf(),
+            source,
+        })
+    }
+
+    /// Default per-user configuration path.
+    pub fn default_path() -> PathBuf {
+        dirs::config_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("voxlocal")
+            .join("config.toml")
+    }
+
+    /// Directory for logs and future session files.
+    pub fn data_dir(&self) -> PathBuf {
+        self.paths.data_dir.clone().unwrap_or_else(|| {
+            dirs::data_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("voxlocal")
+        })
+    }
+
+    /// Directory that contains `models/` and `bin/`.
+    pub fn assets_dir(&self) -> PathBuf {
+        self.paths
+            .assets_dir
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("assets"))
+    }
+}
+
+/// How the chat endpoint is provided.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LlmMode {
+    /// VoxLocal spawns and supervises `llama-server`.
+    Managed,
+    /// The user provides an OpenAI-compatible server (Ollama, LM Studio,
+    /// llama-server already running, a remote gateway...).
+    External,
+}
+
+impl Default for LlmMode {
+    fn default() -> Self {
+        Self::Managed
+    }
+}
+
+/// llama.cpp / OpenAI-compatible server configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LlmConfig {
+    /// Managed process or user-provided endpoint.
+    pub mode: LlmMode,
+    /// `llama-server` binary. Resolved through `PATH` when it has no separators.
+    pub binary: PathBuf,
+    /// Absolute path to a `.gguf` model (managed mode).
+    pub model: Option<PathBuf>,
+    /// Base URL for external mode, for example `http://127.0.0.1:11434/v1`.
+    pub endpoint: String,
+    /// Optional bearer token for external gateways. Stored in plain text.
+    pub api_key: String,
+    /// Bind address for the local server.
+    pub host: String,
+    /// Bind port. Recent llama.cpp builds default to 9931.
+    pub port: u16,
+    /// Layers offloaded to Vulkan (`-ngl`). 99 means "all".
+    pub gpu_layers: i32,
+    /// Context size (`-c`).
+    pub ctx_size: u32,
+    /// CPU threads used by the engine (`-t`).
+    pub threads: u16,
+    /// Sampling temperature.
+    pub temperature: f32,
+    /// Maximum tokens per reply.
+    pub max_tokens: u32,
+    /// System prompt prepended to every conversation.
+    pub system_prompt: String,
+    /// Extra raw arguments for advanced users.
+    pub extra_args: Vec<String>,
+    /// Start the engine when the app launches.
+    pub auto_start: bool,
+    /// How long to wait for the model to load.
+    pub startup_timeout_secs: u64,
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            mode: LlmMode::Managed,
+            binary: PathBuf::from("llama-server"),
+            model: None,
+            endpoint: String::new(),
+            api_key: String::new(),
+            host: "127.0.0.1".to_owned(),
+            port: 9931,
+            gpu_layers: 99,
+            ctx_size: 4096,
+            threads: 8,
+            temperature: 0.7,
+            max_tokens: 512,
+            system_prompt:
+                "Eres un asistente de voz local. Responde de forma breve, clara y natural, sin Markdown."
+                    .to_owned(),
+            extra_args: Vec::new(),
+            auto_start: true,
+            startup_timeout_secs: 90,
+        }
+    }
+}
+
+impl LlmConfig {
+    /// Base URL used by the HTTP client.
+    ///
+    /// Wildcard bind addresses are not reachable as clients; map them to
+    /// loopback.
+    pub fn base_url(&self) -> String {
+        let host = match self.host.as_str() {
+            "0.0.0.0" | "::" | "[::]" => "127.0.0.1",
+            other => other,
+        };
+        format!("http://{host}:{}", self.port)
+    }
+
+    /// HTTP base for the selected mode.
+    pub fn http_base(&self) -> String {
+        if self.mode == LlmMode::External && !self.endpoint.trim().is_empty() {
+            self.endpoint.trim().trim_end_matches('/').to_owned()
+        } else {
+            self.base_url()
+        }
+    }
+
+    /// Full chat-completions URL, accepting bases with or without `/v1`.
+    pub fn chat_completions_url(&self) -> String {
+        self.api_url("chat/completions")
+    }
+
+    /// Full models URL, used as an external-mode health probe.
+    pub fn models_url(&self) -> String {
+        self.api_url("models")
+    }
+
+    fn api_url(&self, suffix: &str) -> String {
+        let base = self.http_base();
+        if base.ends_with("/v1") {
+            format!("{base}/{suffix}")
+        } else {
+            format!("{base}/v1/{suffix}")
+        }
+    }
+
+    /// Whether VoxLocal owns the process.
+    pub fn is_managed(&self) -> bool {
+        self.mode == LlmMode::Managed
+    }
+}
+
+/// whisper.cpp configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SttConfig {
+    /// Whether dictation is enabled.
+    pub enabled: bool,
+    /// `whisper-cli` binary.
+    pub binary: PathBuf,
+    /// Path to a `ggml-*.bin` model.
+    pub model: Option<PathBuf>,
+    /// Language hint (`es`, `en`, ...).
+    pub language: String,
+    /// Threads used by whisper.cpp.
+    pub threads: u16,
+    /// Translate to English instead of transcribing.
+    pub translate: bool,
+    /// Extra raw arguments.
+    pub extra_args: Vec<String>,
+}
+
+impl Default for SttConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            binary: PathBuf::from("whisper-cli"),
+            model: None,
+            language: "es".to_owned(),
+            threads: 8,
+            translate: false,
+            extra_args: Vec::new(),
+        }
+    }
+}
+
+/// Text-to-speech backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TtsBackend {
+    /// The user has not connected a TTS tool yet.
+    Disabled,
+    /// Bundled helper script using `kokoro-onnx` (ONNX Runtime CPU). The user
+    /// provides the interpreter, script and model files.
+    KokoroCli,
+    /// Any command that writes a WAV file; text is sent on stdin.
+    Command,
+}
+
+impl Default for TtsBackend {
+    fn default() -> Self {
+        Self::Disabled
+    }
+}
+
+/// Kokoro / external TTS configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TtsConfig {
+    /// Which backend to use.
+    pub backend: TtsBackend,
+    /// Python interpreter inside the isolated virtual environment.
+    pub python: PathBuf,
+    /// Path to `tools/kokoro_worker.py`.
+    pub worker_script: PathBuf,
+    /// Directory containing the ONNX model and `voices-v1.0.bin`.
+    pub model_dir: PathBuf,
+    /// Kokoro voice id (`ef_dora`, `em_alex`, `af_heart`, ...).
+    pub voice: String,
+    /// Speaking speed (`0.5..=2.0`).
+    pub speed: f32,
+    /// Command template for [`TtsBackend::Command`].
+    ///
+    /// Supported placeholders: `{out}`, `{voice}`, `{speed}`. The text to
+    /// synthesize is written to stdin.
+    pub command: String,
+    /// Extra raw arguments appended to the worker command.
+    pub extra_args: Vec<String>,
+}
+
+impl Default for TtsConfig {
+    fn default() -> Self {
+        Self {
+            backend: TtsBackend::Disabled,
+            python: PathBuf::new(),
+            worker_script: PathBuf::new(),
+            model_dir: PathBuf::new(),
+            voice: String::new(),
+            speed: 1.0,
+            command: String::new(),
+            extra_args: Vec::new(),
+        }
+    }
+}
+
+/// Audio capture, playback and VAD.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AudioConfig {
+    /// Input device name; empty means the system default.
+    pub input_device: String,
+    /// Output device name; empty means the system default.
+    pub output_device: String,
+    /// Sample rate of the analysis pipeline (must stay 16 kHz for STT).
+    pub sample_rate: u32,
+    /// Playback gain (`0.0..=1.0`).
+    pub playback_volume: f32,
+    /// Voice activity detection parameters.
+    pub vad: VadConfig,
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self {
+            input_device: String::new(),
+            output_device: String::new(),
+            sample_rate: 16_000,
+            playback_volume: 1.0,
+            vad: VadConfig::default(),
+        }
+    }
+}
+
+/// WebRTC VAD + endpointing parameters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VadConfig {
+    /// WebRTC mode: `low`, `aggressive` or `quality`.
+    pub mode: String,
+    /// Voiced audio required to open an utterance.
+    pub min_speech_ms: u32,
+    /// Silence required to close an utterance.
+    pub min_silence_ms: u32,
+    /// Audio kept before the first voiced frame.
+    pub padding_ms: u32,
+    /// Hard limit for a single utterance.
+    pub max_utterance_ms: u32,
+    /// Enable full-duplex barge-in (needs headphones or AEC).
+    pub full_duplex: bool,
+}
+
+impl Default for VadConfig {
+    fn default() -> Self {
+        Self {
+            mode: "quality".to_owned(),
+            min_speech_ms: 250,
+            min_silence_ms: 650,
+            padding_ms: 300,
+            max_utterance_ms: 30_000,
+            full_duplex: false,
+        }
+    }
+}
+
+/// User interface preferences.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UiConfig {
+    /// `dark`, `light` or `system` (applied on next start in v0.1).
+    pub theme: String,
+    /// Show the debug/status panel.
+    pub show_debug: bool,
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            theme: "dark".to_owned(),
+            show_debug: false,
+        }
+    }
+}
+
+/// Optional filesystem overrides.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct PathsConfig {
+    /// Directory with `models/` and `bin/`.
+    pub assets_dir: Option<PathBuf>,
+    /// Directory for logs and sessions.
+    pub data_dir: Option<PathBuf>,
+}
+
+/// Configuration errors.
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    /// I/O failure while reading or writing.
+    #[error("no se pudo acceder a {path}: {source}")]
+    Io {
+        /// Offending path.
+        path: PathBuf,
+        /// Underlying error.
+        source: std::io::Error,
+    },
+    /// The TOML or environment values are not valid for the schema.
+    #[error("configuración inválida: {0}")]
+    Invalid(figment::Error),
+    /// Serialization to TOML failed.
+    #[error("no se pudo serializar la configuración: {0}")]
+    Serialize(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_are_valid_and_loopback() {
+        let cfg = VoxConfig::default();
+        assert_eq!(cfg.llm.host, "127.0.0.1");
+        assert_eq!(cfg.llm.port, 9931);
+        assert_eq!(cfg.llm.mode, LlmMode::Managed);
+        assert_eq!(cfg.audio.sample_rate, 16_000);
+        assert_eq!(cfg.audio.vad.min_silence_ms, 650);
+        assert_eq!(cfg.llm.base_url(), "http://127.0.0.1:9931");
+        assert_eq!(cfg.tts.backend, TtsBackend::Disabled);
+        assert!(!cfg.stt.enabled);
+    }
+
+    #[test]
+    fn wildcard_host_maps_to_loopback_for_clients() {
+        let mut cfg = LlmConfig::default();
+        cfg.host = "0.0.0.0".to_owned();
+        assert_eq!(cfg.base_url(), "http://127.0.0.1:9931");
+    }
+
+    #[test]
+    fn partial_toml_is_accepted() {
+        let parsed: VoxConfig = toml::from_str(
+            r#"
+            [llm]
+            port = 9940
+            "#,
+        )
+        .expect("partial TOML should parse");
+
+        assert_eq!(parsed.llm.port, 9940);
+        assert_eq!(parsed.stt.language, "es");
+        assert!(parsed.llm.model.is_none());
+    }
+
+    #[test]
+    fn round_trip_preserves_values() {
+        let mut cfg = VoxConfig::default();
+        cfg.llm.model = Some(PathBuf::from("/tmp/model.gguf"));
+        cfg.tts.voice = "em_alex".to_owned();
+        cfg.audio.vad.min_silence_ms = 800;
+
+        let rendered = toml::to_string_pretty(&cfg).expect("serialize");
+        let parsed: VoxConfig = toml::from_str(&rendered).expect("deserialize");
+        assert_eq!(cfg, parsed);
+    }
+
+    #[test]
+    fn missing_file_uses_defaults() {
+        let cfg = VoxConfig::load(Path::new("/definitely/not/here.toml"))
+            .expect("missing file uses defaults");
+        assert_eq!(cfg, VoxConfig::default());
+    }
+}

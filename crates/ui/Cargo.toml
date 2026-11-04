@@ -1,0 +1,13 @@
+[package]
+name = "ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+gpui-kit = { workspace = true }
+shared = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

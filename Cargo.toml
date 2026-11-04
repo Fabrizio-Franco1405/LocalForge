@@ -1,0 +1,80 @@
+[package]
+name = "voxlocal"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+gpui-kit = { workspace = true }
+shared = { workspace = true }
+ui = { workspace = true }
+llm_engine = { workspace = true }
+stt = { workspace = true }
+tts = { workspace = true }
+audio_engine = { workspace = true }
+crossbeam-channel = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[workspace]
+resolver = "3"
+members = [
+    "crates/llm_engine",
+    "crates/audio_engine",
+    "crates/stt",
+    "crates/tts",
+    "crates/ui",
+    "crates/shared",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+shared = { path = "crates/shared" }
+ui = { path = "crates/ui" }
+llm_engine = { path = "crates/llm_engine" }
+stt = { path = "crates/stt" }
+tts = { path = "crates/tts" }
+audio_engine = { path = "crates/audio_engine" }
+
+gpui-kit = "0.9.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+crossbeam-channel = "0.5"
+figment = { version = "0.10", features = ["toml", "env"] }
+toml = "0.9"
+dirs = "7"
+hound = "3.5"
+cpal = "0.18"
+webrtc-vad = "0.4"
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "process",
+    "io-util",
+    "time",
+    "sync",
+    "macros",
+] }
+reqwest = { version = "0.13", default-features = false, features = [
+    "json",
+    "rustls",
+    "stream",
+] }
+futures-util = "0.3"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"

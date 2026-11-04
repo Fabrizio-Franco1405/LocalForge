@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "rust-best-practices": {
+      "source": "apollographql/skills",
+      "sourceType": "autoskills-registry",
+      "computedHash": "5ab83ce09897beb788b95be5fb855310ed5027551126befbd1e38ebc358d1c19"
+    }
+  }
+}
