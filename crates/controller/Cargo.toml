@@ -10,6 +10,7 @@ llm_engine = { workspace = true }
 crossbeam-channel = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+sysinfo = { workspace = true }
 
 [lints]
 workspace = true

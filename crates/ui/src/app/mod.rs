@@ -20,73 +20,116 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use shared::{DiagnosticItem, EngineCommand, EngineEvent, EngineHandle, LlmMode, LlmState};
 
+use std::path::PathBuf;
+
 use crate::chat::ChatLog;
 use crate::config;
-use crate::settings;
 
+mod call;
 mod chat;
+mod footer;
+mod settings_page;
 mod sidebar;
-mod status;
-mod tools;
+mod studio;
+mod system;
 
-/// Top-level section.
+/// Top-level workspace selected in the sidebar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Page {
-    /// Conversation with the connected model.
+pub enum WorkspaceMode {
+    /// Text conversation.
     Chat,
-    /// LLM motor: local llama.cpp or an external endpoint.
-    Llm,
-    /// Audio motor: STT, TTS, capture and VAD.
-    Audio,
-    /// 3D motor (preview).
-    Scene3d,
-    /// Appearance, paths and environment.
-    General,
-    /// Binary/model diagnostics (not a sidebar section).
-    Tools,
+    /// Immersive voice call.
+    Call,
+    /// 3D studio (Trellis).
+    Studio3d,
+    /// Engine configuration.
+    Settings,
 }
 
-impl Page {
+impl WorkspaceMode {
     /// Sidebar label.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Chat => "Conversación",
-            Self::Llm => "Motor LLM",
-            Self::Audio => "Motor Audio",
-            Self::Scene3d => "Motor 3D",
-            Self::General => "Ajustes",
-            Self::Tools => "Diagnóstico",
+            Self::Chat => "Chat",
+            Self::Call => "Llamada",
+            Self::Studio3d => "Estudio 3D",
+            Self::Settings => "Ajustes",
         }
     }
 
     /// One-line description shown under the header title.
     pub fn subtitle(self) -> &'static str {
         match self {
-            Self::Chat => "Habla o escribe con el motor conectado.",
-            Self::Llm => "llama.cpp local o un servidor externo compatible con OpenAI.",
-            Self::Audio => "Whisper, VAD, TTS y captura de audio: todo opcional.",
-            Self::Scene3d => "Generación local de escenas y mallas · próximamente.",
-            Self::General => "Apariencia, rutas y diagnóstico del entorno.",
-            Self::Tools => "Qué binarios y modelos ve LocalForge.",
+            Self::Chat => "Conversación de texto con el motor conectado.",
+            Self::Call => "Modo voz inmersivo: habla y escucha sin teclado.",
+            Self::Studio3d => "Genera mallas locales con tu Trellis.cpp.",
+            Self::Settings => "Motores, audio, 3D y sistema.",
         }
     }
 
-    /// Stable id used by sidebar items and settings panels.
+    /// Stable id used by sidebar items.
     pub fn id(self) -> &'static str {
         match self {
             Self::Chat => "chat",
-            Self::Llm => "llm",
-            Self::Audio => "audio",
-            Self::Scene3d => "scene3d",
-            Self::General => "general",
-            Self::Tools => "tools",
+            Self::Call => "call",
+            Self::Studio3d => "studio3d",
+            Self::Settings => "settings",
         }
     }
 }
 
+/// Tabs inside the Ajustes workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsTab {
+    /// LLM engine.
+    Llm,
+    /// Audio engine (STT, TTS, VAD).
+    Audio,
+    /// 3D engine.
+    Scene3d,
+    /// Appearance, paths and diagnostics.
+    General,
+    /// Hardware and detected tools.
+    System,
+}
+
+impl SettingsTab {
+    /// Tab label.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Llm => "Motor LLM",
+            Self::Audio => "Motor Audio",
+            Self::Scene3d => "Motor 3D",
+            Self::General => "General",
+            Self::System => "Sistema",
+        }
+    }
+
+    /// Stable id.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Llm => "llm",
+            Self::Audio => "audio",
+            Self::Scene3d => "scene3d",
+            Self::General => "general",
+            Self::System => "system",
+        }
+    }
+
+    /// All tabs, in display order.
+    pub const ALL: [Self; 5] = [
+        Self::Llm,
+        Self::Audio,
+        Self::Scene3d,
+        Self::General,
+        Self::System,
+    ];
+}
+
 /// Application view.
 pub struct VoxApp {
-    page: Page,
+    workspace: WorkspaceMode,
+    settings_tab: SettingsTab,
     engine: EngineHandle,
     log: ChatLog,
     draft: Entity<InputState>,
@@ -103,6 +146,14 @@ pub struct VoxApp {
     ram_used_mb: Option<u64>,
     ram_total_mb: Option<u64>,
     app_mb: Option<u64>,
+    vram_used_mb: Option<u64>,
+    vram_total_mb: Option<u64>,
+    speaking: bool,
+    pulse: f32,
+    call_caption: String,
+    hardware: Vec<DiagnosticItem>,
+    hardware_loaded: bool,
+    studio_image: Option<PathBuf>,
     diagnostics: Vec<DiagnosticItem>,
     probing: bool,
     notice: Option<String>,
@@ -143,7 +194,8 @@ impl VoxApp {
         });
 
         let mut app = Self {
-            page: Page::Chat,
+            workspace: WorkspaceMode::Chat,
+            settings_tab: SettingsTab::Llm,
             engine,
             log: ChatLog::new(),
             draft,
@@ -160,6 +212,14 @@ impl VoxApp {
             ram_used_mb: None,
             ram_total_mb: None,
             app_mb: None,
+            vram_used_mb: None,
+            vram_total_mb: None,
+            speaking: false,
+            pulse: 0.0,
+            call_caption: String::new(),
+            hardware: Vec::new(),
+            hardware_loaded: false,
+            studio_image: None,
             diagnostics: Vec::new(),
             probing: false,
             notice: None,
@@ -174,12 +234,16 @@ impl VoxApp {
 
     /// Drains controller events. Called by the pump every 50 ms.
     fn pump(&mut self, cx: &mut Context<Self>) {
-        let events = self.engine.drain();
-        if events.is_empty() {
-            return;
+        let mut changed = false;
+
+        // Cheap animation driver: only the call workspace needs a repaint at
+        // 20 Hz, so other views stay idle when nothing happens.
+        if self.workspace == WorkspaceMode::Call {
+            self.pulse = (self.pulse + 0.16) % std::f32::consts::TAU;
+            changed = true;
         }
 
-        let mut changed = false;
+        let events = self.engine.drain();
         for event in events {
             changed |= self.handle_event(event);
         }
@@ -225,6 +289,7 @@ impl VoxApp {
                 if text.is_empty() {
                     return false;
                 }
+                self.call_caption = text.clone();
                 self.send_prompt(text);
                 true
             }
@@ -237,10 +302,11 @@ impl VoxApp {
                 }
             }
             EngineEvent::Speaking(speaking) => {
+                self.speaking = speaking;
                 if speaking {
                     self.llm_detail = "Hablando".to_owned();
                 }
-                false
+                true
             }
             EngineEvent::Diagnostics { items } => {
                 self.diagnostics = items;
@@ -257,11 +323,20 @@ impl VoxApp {
                 ram_total_mb,
                 ram_used_mb,
                 app_mb,
+                vram_used_mb,
+                vram_total_mb,
             } => {
                 self.cpu = cpu_percent;
                 self.ram_total_mb = ram_total_mb;
                 self.ram_used_mb = ram_used_mb;
                 self.app_mb = app_mb;
+                self.vram_used_mb = vram_used_mb;
+                self.vram_total_mb = vram_total_mb;
+                true
+            }
+            EngineEvent::Hardware { items } => {
+                self.hardware = items;
+                self.hardware_loaded = true;
                 true
             }
             EngineEvent::Error { scope, message } => {
@@ -400,10 +475,12 @@ impl VoxApp {
         cx.notify();
     }
 
-    /// Header shown above every page: title, subtitle and shared actions.
-    fn header(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
+    /// Header shown above every workspace: title, subtitle and actions.
+    fn header(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let theme = cx.theme().clone();
         let dirty = config::is_dirty(cx);
+        let managed = config::current(cx).llm.mode == LlmMode::Managed;
+        let running = matches!(self.llm, LlmState::Ready | LlmState::Starting);
 
         div()
             .flex()
@@ -424,13 +501,13 @@ impl VoxApp {
                             .text_base()
                             .font_semibold()
                             .text_color(theme.foreground)
-                            .child(self.page.label()),
+                            .child(self.workspace.label()),
                     )
                     .child(
                         div()
                             .text_xs()
                             .text_color(theme.muted_foreground)
-                            .child(self.page.subtitle()),
+                            .child(self.workspace.subtitle()),
                     ),
             )
             .child(
@@ -438,37 +515,27 @@ impl VoxApp {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .when(matches!(self.page, Page::Chat | Page::Llm), |this| {
-                        let mode = config::current(cx).llm.mode;
-                        this.child(
-                            div()
-                                .px_2()
-                                .py_1()
-                                .rounded_full()
-                                .bg(theme.muted)
-                                .text_xs()
-                                .font_semibold()
-                                .text_color(theme.muted_foreground)
-                                .child(match mode {
-                                    LlmMode::Managed => "LOCAL",
-                                    LlmMode::External => "EXTERNO",
-                                }),
-                        )
-                    })
-                    .when(self.page == Page::General, |this| {
-                        this.child(
-                            Button::new("open-tools")
-                                .small()
-                                .ghost()
-                                .icon(IconName::Activity)
-                                .label("Diagnóstico")
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.page = Page::Tools;
-                                    this.probe(cx);
-                                })),
-                        )
-                    })
-                    .when(self.page == Page::Chat, |this| {
+                    .when(
+                        matches!(self.workspace, WorkspaceMode::Chat | WorkspaceMode::Call),
+                        |this| {
+                            let mode = config::current(cx).llm.mode;
+                            this.child(
+                                div()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_full()
+                                    .bg(theme.muted)
+                                    .text_xs()
+                                    .font_semibold()
+                                    .text_color(theme.muted_foreground)
+                                    .child(match mode {
+                                        LlmMode::Managed => "LOCAL",
+                                        LlmMode::External => "EXTERNO",
+                                    }),
+                            )
+                        },
+                    )
+                    .when(self.workspace == WorkspaceMode::Chat, |this| {
                         this.child(
                             Button::new("new-chat")
                                 .small()
@@ -479,10 +546,10 @@ impl VoxApp {
                         )
                     })
                     .when(
-                        matches!(self.page, Page::Chat | Page::Llm)
-                            && config::current(cx).llm.mode == LlmMode::Managed,
+                        matches!(self.workspace, WorkspaceMode::Chat | WorkspaceMode::Call)
+                            && managed,
                         |this| {
-                            if matches!(self.llm, LlmState::Ready | LlmState::Starting) {
+                            if running {
                                 this.child(
                                     Button::new("stop-llm")
                                         .small()
@@ -507,32 +574,7 @@ impl VoxApp {
                             }
                         },
                     )
-                    .when(self.page == Page::Llm, |this| {
-                        this.child(
-                            Button::new("restart-llm")
-                                .small()
-                                .ghost()
-                                .icon(IconName::RotateCw)
-                                .label("Reiniciar")
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.restart_engine(window, cx)
-                                })),
-                        )
-                    })
-                    .when(self.page != Page::Chat, |this| {
-                        this.child(
-                            Button::new("back-chat")
-                                .small()
-                                .ghost()
-                                .icon(IconName::MessageSquare)
-                                .label("Chat")
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.page = Page::Chat;
-                                    cx.notify();
-                                })),
-                        )
-                    })
-                    .when(matches!(self.page, Page::Chat | Page::Llm), |this| {
+                    .when(self.workspace == WorkspaceMode::Chat, |this| {
                         this.child(
                             Button::new("header-probe")
                                 .small()
@@ -540,6 +582,50 @@ impl VoxApp {
                                 .icon(IconName::RefreshCw)
                                 .label("Probar")
                                 .on_click(cx.listener(|this, _, _, cx| this.probe_connection(cx))),
+                        )
+                    })
+                    .when(
+                        matches!(self.workspace, WorkspaceMode::Chat | WorkspaceMode::Call)
+                            && managed,
+                        |this| {
+                            this.child(
+                                Button::new("restart-llm")
+                                    .small()
+                                    .ghost()
+                                    .icon(IconName::RotateCw)
+                                    .label("Reiniciar")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.restart_engine(window, cx)
+                                    })),
+                            )
+                        },
+                    )
+                    .when(self.workspace == WorkspaceMode::Studio3d, |this| {
+                        this.child(
+                            Button::new("studio-settings")
+                                .small()
+                                .ghost()
+                                .icon(IconName::Settings)
+                                .label("Configurar Trellis")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.workspace = WorkspaceMode::Settings;
+                                    this.settings_tab = SettingsTab::Scene3d;
+                                    cx.notify();
+                                })),
+                        )
+                    })
+                    .when(self.workspace == WorkspaceMode::Call, |this| {
+                        this.child(
+                            Button::new("call-settings")
+                                .small()
+                                .ghost()
+                                .icon(IconName::SlidersHorizontal)
+                                .label("Audio")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.workspace = WorkspaceMode::Settings;
+                                    this.settings_tab = SettingsTab::Audio;
+                                    cx.notify();
+                                })),
                         )
                     })
                     .when(dirty, |this| {
@@ -560,7 +646,13 @@ impl VoxApp {
 
 impl Render for VoxApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
+        let theme = cx.theme().clone();
+        let content = match self.workspace {
+            WorkspaceMode::Chat => self.chat_page(cx).into_any_element(),
+            WorkspaceMode::Call => self.call_page(cx).into_any_element(),
+            WorkspaceMode::Studio3d => self.studio_page(cx).into_any_element(),
+            WorkspaceMode::Settings => self.settings_page(cx).into_any_element(),
+        };
 
         div()
             .flex()
@@ -575,12 +667,8 @@ impl Render for VoxApp {
                     .flex()
                     .flex_col()
                     .child(self.header(cx))
-                    .child(div().flex_1().min_h(px(0.)).child(match self.page {
-                        Page::Chat => self.chat_page(cx).into_any_element(),
-                        Page::Tools => self.tools_page(cx).into_any_element(),
-                        _ => settings::view(cx, self.page).into_any_element(),
-                    }))
-                    .child(self.status_bar(cx)),
+                    .child(div().flex_1().min_h(px(0.)).child(content))
+                    .child(self.footer(cx)),
             )
     }
 }

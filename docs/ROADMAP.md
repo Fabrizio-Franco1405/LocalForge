@@ -18,7 +18,7 @@ Los criterios de aceptación se prueban en la máquina objetivo (RX 5700 XT +
 - [ ] `WhisperCli` (WAV 16 kHz + parser) → M2.
 - [ ] `KokoroCli` + worker Python → M3.
 - [ ] `AudioCapture`, `AudioPlayer`, `EndpointDetector` y `LinearResampler` → M2/M4.
-- [ ] `scene3d` (motor 3D) → M6.
+- [ ] `scene3d` (motor 3D + visor) → M6.
 
 **Criterio:** `cargo run` abre la app, guarda ajustes y conversa por texto con
 un GGUF local o un servidor OpenAI externo.

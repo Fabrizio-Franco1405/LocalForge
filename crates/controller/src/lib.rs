@@ -8,6 +8,7 @@
 //! The LLM state is never assumed: every change comes from an HTTP probe, so
 //! a `llama-server` started outside LocalForge is detected and used directly.
 
+pub mod hardware;
 pub mod system;
 
 use std::sync::Arc;
@@ -116,6 +117,8 @@ impl Controller {
                         ram_total_mb: usage.ram_total_mb,
                         ram_used_mb: usage.ram_used_mb,
                         app_mb: usage.app_mb,
+                        vram_used_mb: usage.vram_used_mb,
+                        vram_total_mb: usage.vram_total_mb,
                     };
                     if events.send(event).is_err() {
                         break;
@@ -514,6 +517,7 @@ impl Controller {
                 );
             }
             EngineCommand::ProbeTools => self.emit_diagnostics().await,
+            EngineCommand::ProbeHardware => self.emit_hardware().await,
             EngineCommand::Shutdown => return false,
         }
 
@@ -637,6 +641,11 @@ impl Controller {
                 self.emit(EngineEvent::ReplyDone { generation, text });
             }
         }
+    }
+
+    async fn emit_hardware(&mut self) {
+        let items = hardware::collect(&self.config).await;
+        self.emit(EngineEvent::Hardware { items });
     }
 
     async fn emit_diagnostics(&mut self) {

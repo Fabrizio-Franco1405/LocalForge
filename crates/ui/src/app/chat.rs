@@ -7,7 +7,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use shared::{LlmState, TtsBackend};
 
-use crate::app::{Page, VoxApp};
+use crate::app::{SettingsTab, VoxApp, WorkspaceMode};
 use crate::chat::render_bubble;
 use crate::config;
 
@@ -135,7 +135,8 @@ impl VoxApp {
                                     .primary()
                                     .label("Configurar motor")
                                     .on_click(cx.listener(|this, _, _, cx| {
-                                        this.page = Page::Llm;
+                                        this.workspace = WorkspaceMode::Settings;
+                                        this.settings_tab = SettingsTab::Llm;
                                         cx.notify();
                                     })),
                             )
@@ -152,8 +153,9 @@ impl VoxApp {
                                     .ghost()
                                     .label("Ver herramientas")
                                     .on_click(cx.listener(|this, _, _, cx| {
-                                        this.page = Page::Tools;
-                                        this.probe(cx);
+                                        this.workspace = WorkspaceMode::Settings;
+                                        this.settings_tab = SettingsTab::System;
+                                        this.ensure_hardware(cx);
                                     })),
                             ),
                     ),

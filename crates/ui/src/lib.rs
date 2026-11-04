@@ -9,5 +9,5 @@ pub mod config;
 pub mod settings;
 pub mod theme;
 
-pub use app::{Page, VoxApp};
+pub use app::{SettingsTab, VoxApp, WorkspaceMode};
 pub use config::{GlobalConfig, init};

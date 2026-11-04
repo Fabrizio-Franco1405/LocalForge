@@ -14,7 +14,7 @@ Este proyecto está diseñado **exclusivamente para hardware de gama media/antig
 ## 3. Arquitectura: crates y módulos
 El workspace tiene un binario mínimo (`src/main.rs`) y crates con responsabilidades separadas:
 
-- `crates/controller`: hilo del controlador (comandos, procesos, HTTP, generaciones, diagnóstico) y muestreo de CPU/RAM (`system.rs`). Librería pura, sin GPUI.
+- `crates/controller`: hilo del controlador (comandos, procesos, HTTP, generaciones, diagnóstico), muestreo CPU/RAM/VRAM (`system.rs`) y hardware (`hardware.rs`). Librería pura, sin GPUI.
 - `crates/shared`: contrato UI ⇄ motores, configuración, texto y resolución de rutas. Es hoja.
 - `crates/llm_engine`: `llama-server` gestionado y modo externo OpenAI (`/v1/models`, SSE).
 - `crates/stt`: wrapper de `whisper-cli`. **Stub (M2).**
@@ -22,9 +22,11 @@ El workspace tiene un binario mínimo (`src/main.rs`) y crates con responsabilid
 - `crates/audio_engine`: captura, VAD y playback. **Stub (M2/M4).**
 - `crates/scene3d`: motor 3D. **Stub (futuro).**
 - `crates/ui`: vista GPUI componentizada:
-  - `app/mod.rs` — shell, `Page`, pump de eventos y acciones compartidas.
-  - `app/sidebar.rs` — marca + 4 secciones + estado del motor.
-  - `app/chat.rs`, `app/tools.rs`, `app/status.rs` — conversación, diagnóstico y barra inferior.
+  - `app/mod.rs` — shell, `WorkspaceMode`, `SettingsTab`, pump y acciones.
+  - `app/sidebar.rs` — marca + 4 workspaces (Chat, Llamada, Estudio 3D, Ajustes).
+  - `app/chat.rs`, `app/call.rs`, `app/studio.rs` — los tres workspaces.
+  - `app/settings_page.rs` + `app/system.rs` — pestañas de Ajustes y panel de hardware.
+  - `app/footer.rs` — estado del LLM, CPU/RAM/VRAM, micrófono y altavoz.
   - `settings/mod.rs` + `settings/{fields,llm,audio,scene3d,general}.rs` — una página por motor.
   - `settings/llm.rs` decide los campos según `LlmMode`: Local muestra binario/GGUF/host; Externo muestra endpoint/model id/API key. Nunca ambos.
 
@@ -33,6 +35,8 @@ El workspace tiene un binario mínimo (`src/main.rs`) y crates con responsabilid
 **Regla de tamaño:** ningún archivo de UI debe volver a pasar de ~500 líneas; una página o grupo de widgets por módulo.
 
 **Regla de frontera:** el core no importa GPUI. La UI consume `EngineCommand`/`EngineEvent`; sustituirla por JS/TS o Python es implementar ese protocolo, no tocar los motores. `test/tests/boundary.rs` lo verifica.
+
+**Regla multiplataforma:** nada de `/proc` obligatorio, rutas POSIX asumidas ni `unsafe`. Usa `sysinfo`, `PathBuf`, `shared::tools::resolve_binary` (PATHEXT) y `rfd`. Linux, Windows 11 y macOS deben compilar y funcionar.
 
 Nota de estado: `llm_engine`, `shared`, `ui`, `controller` están implementados; `stt`, `tts`, `audio_engine` y `scene3d` compilan como placeholders con su contrato en el docstring. No añadas funcionalidad simulada: implementa el crate o deja el stub honesto.
 
@@ -99,7 +103,7 @@ Nota de estado: `llm_engine`, `shared`, `ui`, `controller` están implementados;
   `test/tests/`.
 - Para probar lógica privada, expón una API pública pequeña y documentada (ej.
   `shared::text::truncate_chars`, `ui::theme::parse_hex`), no dejes el test dentro del crate.
-- Comando: `cd test && cargo test` (51 tests; sin GPU, micrófono, modelos ni red externa).
+- Comando: `cd test && cargo test` (53 tests; sin GPU, micrófono, modelos ni red externa).
 - Lo que requiera hardware, modelos o latencia real va a `test/docs/hardware.md` como
   checklist manual, no como test automatizado.
 

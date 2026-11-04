@@ -1,146 +1,172 @@
-//! Host and process resource sampling.
+//! Host, process and GPU resource sampling.
 //!
-//! Lives in the core (not in the UI) so any front-end — current GPUI shell or a
-//! future JS/TS/Python client — can show the same numbers through
-//! [`EngineEvent::SystemUsage`]. Linux is the supported sampler today; other
-//! platforms report zeros and the UI shows "n/d" instead of inventing data.
+//! Uses `sysinfo` so the same code reports CPU/RAM on Linux, Windows and macOS.
+//! VRAM is best-effort: AMD sysfs on Linux and `nvidia-smi` on any OS that has
+//! it. Unsupported combinations return `None` and the UI shows "n/d" instead of
+//! inventing a number.
 
-use std::time::Instant;
+use std::process::Command;
+
+use sysinfo::{Pid, ProcessesToUpdate, System};
 
 /// One resource sample.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct SystemUsage {
-    /// Host CPU usage in percent (`0..=100`). `None` when unsupported.
+    /// Host CPU usage in percent (`0..=100`). `None` before the first delta.
     pub cpu_percent: Option<f32>,
     /// Total RAM in MiB.
     pub ram_total_mb: Option<u64>,
-    /// Used RAM in MiB (`total - available`, not cache).
+    /// Used RAM in MiB.
     pub ram_used_mb: Option<u64>,
     /// Resident memory of this process in MiB.
     pub app_mb: Option<u64>,
+    /// GPU memory in use, in MiB (AMD sysfs or nvidia-smi).
+    pub vram_used_mb: Option<u64>,
+    /// Total GPU memory, in MiB.
+    pub vram_total_mb: Option<u64>,
 }
 
-/// Stateful sampler: CPU needs two `/proc/stat` reads to compute a delta.
-#[derive(Debug, Default)]
+/// Stateful sampler. CPU values need a previous sample to compute a delta.
+#[derive(Debug)]
 pub struct SystemSampler {
-    previous: Option<(u64, u64)>,
-    last_at: Option<Instant>,
+    system: System,
+    pid: Option<Pid>,
+    started: bool,
+}
+
+impl Default for SystemSampler {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SystemSampler {
-    /// Creates an empty sampler. The first sample has no CPU percentage yet.
+    /// Creates a sampler and primes CPU counters.
     pub fn new() -> Self {
-        Self::default()
+        let mut system = System::new_all();
+        system.refresh_cpu_usage();
+        system.refresh_memory();
+
+        Self {
+            system,
+            pid: sysinfo::get_current_pid().ok(),
+            started: false,
+        }
     }
 
-    /// Takes a sample, computing CPU usage against the previous call.
+    /// Takes a sample.
     pub fn sample(&mut self) -> SystemUsage {
-        #[cfg(target_os = "linux")]
-        {
-            let cpu = std::fs::read_to_string("/proc/stat")
-                .ok()
-                .and_then(|text| parse_proc_stat(&text));
-            let mem = std::fs::read_to_string("/proc/meminfo")
-                .ok()
-                .and_then(|text| parse_meminfo(&text));
-            let rss = std::fs::read_to_string("/proc/self/status")
-                .ok()
-                .and_then(|text| parse_status_rss_kb(&text));
+        self.system.refresh_cpu_usage();
+        self.system.refresh_memory();
 
-            let cpu_percent = match (self.previous, cpu) {
-                (Some((idle0, total0)), Some((idle1, total1))) => {
-                    let total = total1.saturating_sub(total0);
-                    let idle = idle1.saturating_sub(idle0);
-                    if total == 0 {
-                        Some(0.0)
-                    } else {
-                        let busy = total.saturating_sub(idle);
-                        Some((busy as f32 / total as f32) * 100.0)
-                    }
-                }
-                _ => None,
-            };
-            if let Some(values) = cpu {
-                self.previous = Some(values);
-            }
-            self.last_at = Some(Instant::now());
+        let cpu_percent = if self.started {
+            let usage = self.system.global_cpu_usage();
+            (usage.is_finite()).then_some(usage.clamp(0.0, 100.0))
+        } else {
+            self.started = true;
+            None
+        };
 
-            let (ram_total_mb, ram_used_mb, app_mb) = match (mem, rss) {
-                (Some((total_kb, available_kb)), rss_kb) => (
-                    Some(total_kb / 1024),
-                    Some(total_kb.saturating_sub(available_kb) / 1024),
-                    rss_kb.map(|kb| kb / 1024),
-                ),
-                (None, rss_kb) => (None, None, rss_kb.map(|kb| kb / 1024)),
-            };
+        let app_mb = self.pid.and_then(|pid| {
+            self.system
+                .refresh_processes(ProcessesToUpdate::Some(&[pid]));
+            self.system
+                .process(pid)
+                .map(|process| process.memory() / (1024 * 1024))
+        });
 
-            SystemUsage {
-                cpu_percent,
-                ram_total_mb,
-                ram_used_mb,
-                app_mb,
-            }
+        let ram_total_mb = Some(self.system.total_memory() / (1024 * 1024));
+        let ram_used_mb = Some(self.system.used_memory() / (1024 * 1024));
+        let (vram_used_mb, vram_total_mb) = vram_usage();
+
+        SystemUsage {
+            cpu_percent,
+            ram_total_mb,
+            ram_used_mb,
+            app_mb,
+            vram_used_mb,
+            vram_total_mb,
         }
-
-        #[cfg(not(target_os = "linux"))]
-        {
-            self.last_at = Some(Instant::now());
-            SystemUsage::default()
-        }
-    }
-
-    /// Seconds since the previous sample, if any.
-    pub fn elapsed_secs(&self) -> Option<f32> {
-        self.last_at.map(|instant| instant.elapsed().as_secs_f32())
     }
 }
 
-/// Parses the aggregate `cpu` line of `/proc/stat`.
+/// Best-effort VRAM usage for the active GPU.
+pub fn vram_usage() -> (Option<u64>, Option<u64>) {
+    if let Some(values) = vram_from_sysfs() {
+        return values;
+    }
+
+    vram_from_nvidia_smi()
+}
+
+#[cfg(target_os = "linux")]
+fn vram_from_sysfs() -> Option<(Option<u64>, Option<u64>)> {
+    let mut best: Option<(u64, u64)> = None;
+
+    for entry in std::fs::read_dir("/sys/class/drm").ok()?.flatten() {
+        let path = entry.path();
+        if !path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("card"))
+        {
+            continue;
+        }
+
+        let device = path.join("device");
+        let used = read_number(device.join("mem_info_vram_used"));
+        let total = read_number(device.join("mem_info_vram_total"));
+        if let (Some(used), Some(total)) = (used, total)
+            && total > 0
+            && best.is_none_or(|(_, best_total)| total > best_total)
+        {
+            best = Some((used, total));
+        }
+    }
+
+    best.map(|(used, total)| (Some(used / (1024 * 1024)), Some(total / (1024 * 1024))))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn vram_from_sysfs() -> Option<(Option<u64>, Option<u64>)> {
+    None
+}
+
+fn vram_from_nvidia_smi() -> (Option<u64>, Option<u64>) {
+    let output = Command::new("nvidia-smi")
+        .args([
+            "--query-gpu=memory.used,memory.total",
+            "--format=csv,noheader,nounits",
+        ])
+        .output();
+
+    let Ok(output) = output else {
+        return (None, None);
+    };
+    if !output.status.success() {
+        return (None, None);
+    }
+
+    parse_nvidia_smi(&String::from_utf8_lossy(&output.stdout)).unwrap_or((None, None))
+}
+
+/// Parses `nvidia-smi --query-gpu=memory.used,memory.total` output.
 ///
-/// Returns `(idle_all, total)`, where `idle_all` includes `iowait`.
-pub fn parse_proc_stat(input: &str) -> Option<(u64, u64)> {
-    let line = input.lines().find(|line| line.starts_with("cpu "))?;
-    let values: Vec<u64> = line
-        .split_whitespace()
-        .skip(1)
-        .filter_map(|value| value.parse().ok())
-        .collect();
-    if values.len() < 4 {
-        return None;
-    }
+/// Takes the first GPU and accepts extra whitespace. Returns MiB.
+pub fn parse_nvidia_smi(input: &str) -> Option<(Option<u64>, Option<u64>)> {
+    let line = input.lines().next()?.trim();
+    let (used, total) = line.split_once(',')?;
+    let used = used.trim().parse::<u64>().ok()?;
+    let total = total.trim().parse::<u64>().ok()?;
 
-    let idle = values[3];
-    let iowait = values.get(4).copied().unwrap_or(0);
-    let total: u64 = values.iter().sum();
-    Some((idle + iowait, total))
+    Some((Some(used), Some(total)))
 }
 
-/// Parses `MemTotal` and `MemAvailable` (in kB) from `/proc/meminfo`.
-pub fn parse_meminfo(input: &str) -> Option<(u64, u64)> {
-    let mut total = None;
-    let mut available = None;
-
-    for line in input.lines() {
-        let mut parts = line.split_whitespace();
-        let key = parts.next()?;
-        let value: u64 = parts.next()?.parse().ok()?;
-        match key {
-            "MemTotal:" => total = Some(value),
-            "MemAvailable:" => available = Some(value),
-            _ => {}
-        }
-    }
-
-    Some((total?, available?))
-}
-
-/// Parses `VmRSS` (in kB) from `/proc/self/status`.
-pub fn parse_status_rss_kb(input: &str) -> Option<u64> {
-    input.lines().find_map(|line| {
-        let mut parts = line.split_whitespace();
-        if parts.next()? != "VmRSS:" {
-            return None;
-        }
-        parts.next()?.parse().ok()
-    })
+#[cfg(target_os = "linux")]
+fn read_number(path: std::path::PathBuf) -> Option<u64> {
+    std::fs::read_to_string(path)
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()
 }

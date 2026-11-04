@@ -45,7 +45,7 @@ cd test && cargo test            # suite aislada (fuera del workspace y de git)
 │   ├── tts/                Kokoro worker          (stub, M3)
 │   ├── audio_engine/       cpal + VAD             (stub, M2/M4)
 │   ├── scene3d/            local 3D engine        (stub)
-│   └── ui/                 app/ + settings/ modules
+│   └── ui/                 app/ (chat, call, studio, system, footer) + settings/
 ├── assets/
 │   ├── bin/                local binaries         (ignored)
 │   └── models/             model files            (ignored)

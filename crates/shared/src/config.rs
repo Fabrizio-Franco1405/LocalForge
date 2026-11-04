@@ -479,6 +479,12 @@ pub struct Scene3dConfig {
     pub endpoint: String,
     /// Command template for CLI backends.
     pub command: String,
+    /// Trellis.cpp binary or wrapper CLI.
+    pub trellis_binary: PathBuf,
+    /// Generation resolution (512 or 1024).
+    pub resolution: u32,
+    /// Directory for generated GLB/OBJ files.
+    pub output_dir: Option<PathBuf>,
     /// Directory containing checkpoints and meshes.
     pub model_dir: Option<PathBuf>,
     /// Extra raw arguments.
@@ -492,6 +498,9 @@ impl Default for Scene3dConfig {
             backend: "disabled".to_owned(),
             endpoint: String::new(),
             command: String::new(),
+            trellis_binary: PathBuf::from("trellis-cli"),
+            resolution: 512,
+            output_dir: None,
             model_dir: None,
             extra_args: Vec::new(),
         }

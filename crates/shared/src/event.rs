@@ -72,6 +72,8 @@ pub enum EngineCommand {
     SetListening(bool),
     /// Ask the controller to validate the connected tools and paths.
     ProbeTools,
+    /// Ask the controller for a hardware/system report.
+    ProbeHardware,
     /// Re-probe the LLM endpoint and refresh its live status.
     ProbeLlm,
     /// Stop all processes and end the controller loop.
@@ -148,6 +150,15 @@ pub enum EngineEvent {
         ram_used_mb: Option<u64>,
         /// Resident memory of this application in MiB.
         app_mb: Option<u64>,
+        /// GPU memory in use, in MiB.
+        vram_used_mb: Option<u64>,
+        /// Total GPU memory, in MiB.
+        vram_total_mb: Option<u64>,
+    },
+    /// Hardware/system report for the Ajustes → Sistema page.
+    Hardware {
+        /// Checks and detected components, in display order.
+        items: Vec<DiagnosticItem>,
     },
     /// A recoverable error. The operation that produced it is finished.
     Error {
