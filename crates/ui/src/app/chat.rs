@@ -1,11 +1,14 @@
 //! Conversation page: banner, messages, composer and context meter.
 
+use std::path::PathBuf;
+
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::Input;
-use gpui_kit::component::{ActiveTheme as _, StyledExt as _};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use shared::{LlmState, TtsBackend};
+use shared::{EngineCommand, LlmState, TtsBackend};
 
 use crate::app::{SettingsTab, VoxApp, WorkspaceMode};
 use crate::chat::render_bubble;
@@ -318,6 +321,7 @@ impl VoxApp {
                         this.child(self.message_list(cx))
                     }),
             )
+            .child(self.chat_toolbar(cx))
             .child(self.composer(cx))
     }
     /// Dibuja el indicador de contexto.
@@ -422,4 +426,231 @@ fn feature_card(
                 .text_color(theme.muted_foreground)
                 .child(body),
         )
+}
+
+impl VoxApp {
+    /// Model picker, attachments and MCP entry point above the messages.
+    fn chat_toolbar(&mut self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let theme = cx.theme().clone();
+        let models = config::models(cx);
+        let attachments = self.attachments.clone();
+        let open = self.model_menu;
+
+        let mut rows = Vec::with_capacity(models.len());
+        for (index, entry) in models.iter().enumerate() {
+            let path = entry.path.clone();
+            let alias = entry.name.clone();
+            let selected = config::current(cx)
+                .llm
+                .model
+                .as_ref()
+                .is_some_and(|current| current.display().to_string() == entry.path);
+            let label = config::current(cx)
+                .llm
+                .model_aliases
+                .get(&entry.path)
+                .filter(|alias| !alias.trim().is_empty())
+                .cloned()
+                .unwrap_or_else(|| entry.name.clone());
+
+            rows.push(
+                div()
+                    .id(format!("model-row-{index}"))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .px_4()
+                    .py_2()
+                    .cursor_pointer()
+                    .when(selected, |this| this.bg(theme.primary.opacity(0.12)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.select_model(path.clone(), alias.clone(), cx);
+                    }))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(div().text_sm().text_color(theme.foreground).child(label))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child(format!("{} · {} MB", entry.name, entry.size_mb)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(entry.path.clone()),
+                    ),
+            );
+        }
+
+        let mut chips = Vec::with_capacity(attachments.len());
+        for (index, path) in attachments.iter().enumerate() {
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("archivo")
+                .to_owned();
+            chips.push(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .bg(theme.muted)
+                    .child(div().text_xs().text_color(theme.foreground).child(name))
+                    .child(
+                        Button::new(format!("remove-attachment-{index}"))
+                            .small()
+                            .ghost()
+                            .icon(IconName::X)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if index < this.attachments.len() {
+                                    this.attachments.remove(index);
+                                }
+                                cx.notify();
+                            })),
+                    ),
+            );
+        }
+
+        div()
+            .flex()
+            .flex_col()
+            .border_b_1()
+            .border_color(theme.border)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_4()
+                    .py_2()
+                    .child(
+                        Button::new("model-picker")
+                            .small()
+                            .ghost()
+                            .icon(IconName::Bot)
+                            .label(config::model_label(cx))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.model_menu = !this.model_menu;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("attach-files")
+                            .small()
+                            .ghost()
+                            .icon(IconName::Paperclip)
+                            .label("Adjuntar")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(paths) = rfd::FileDialog::new().pick_files() {
+                                    this.attachments.extend(paths);
+                                    cx.notify();
+                                }
+                            })),
+                    )
+                    .child(
+                        Button::new("mcp-servers")
+                            .small()
+                            .ghost()
+                            .icon(IconName::Plug)
+                            .label("MCP")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.workspace = WorkspaceMode::Settings;
+                                this.settings_tab = SettingsTab::Mcp;
+                                cx.notify();
+                            })),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        Button::new("manage-models")
+                            .small()
+                            .ghost()
+                            .icon(IconName::Settings)
+                            .label("Modelos")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.workspace = WorkspaceMode::Settings;
+                                this.settings_tab = SettingsTab::Llm;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .when(open, |this| {
+                this.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .border_t_1()
+                        .border_color(theme.border)
+                        .when(models.is_empty(), |this| {
+                            this.child(
+                                div()
+                                    .px_4()
+                                    .py_3()
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child("Sin modelos: configura una carpeta en Ajustes → Motor LLM."),
+                            )
+                        })
+                        .children(rows),
+                )
+            })
+            .when(!attachments.is_empty(), |this| {
+                this.child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_2()
+                        .px_4()
+                        .py_2()
+                        .children(chips),
+                )
+            })
+    }
+
+    fn select_model(&mut self, path: String, alias: String, cx: &mut Context<Self>) {
+        let model = PathBuf::from(&path);
+        config::update(cx, |cfg| {
+            cfg.llm.model_aliases.entry(path.clone()).or_insert(alias);
+            cfg.llm.model = Some(model);
+            cfg.llm.model_id.clear();
+        });
+
+        let cfg = config::current(cx);
+        self.engine.send(EngineCommand::ReloadConfig(Box::new(cfg)));
+        cx.global_mut::<config::GlobalConfig>().mark_applied();
+        self.model_menu = false;
+        self.notice = Some("Modelo cambiado: reiniciando el motor…".to_owned());
+        cx.notify();
+    }
+
+    /// Appends attachment contents (text, bounded) to the outgoing prompt.
+    pub(super) fn with_attachments(&mut self, text: String) -> String {
+        if self.attachments.is_empty() {
+            return text;
+        }
+
+        let mut prompt = text;
+        for path in std::mem::take(&mut self.attachments) {
+            prompt.push_str("\n\n[Adjunto: ");
+            prompt.push_str(&path.display().to_string());
+            prompt.push_str("]\n");
+            match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    prompt.push_str(&shared::text::truncate_chars(&content, 8000));
+                }
+                Err(_) => prompt.push_str("(archivo binario; solo se adjunta la ruta)"),
+            }
+        }
+        prompt
+    }
 }

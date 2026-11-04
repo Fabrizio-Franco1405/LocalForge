@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 
 use gpui_kit::*;
-use shared::VoxConfig;
+use shared::{EngineHandle, ModelEntry, VoxConfig};
 
 /// Global holding the live configuration and the last applied snapshot.
 #[derive(Clone)]
@@ -53,9 +53,68 @@ impl GlobalConfig {
     }
 }
 
-/// Installs the global. Call once, before opening the window.
+/// Installs the globals. Call once, before opening the window.
 pub fn init(cx: &mut App, config: VoxConfig, path: PathBuf) {
     cx.set_global(GlobalConfig::new(config, path));
+    cx.set_global(ModelLibrary::default());
+}
+
+/// Models discovered by the controller.
+#[derive(Clone, Default)]
+pub struct ModelLibrary {
+    /// `.gguf` files found in the configured folder.
+    pub entries: Vec<ModelEntry>,
+}
+
+impl Global for ModelLibrary {}
+
+/// Handle used by settings controls that need to ask the controller for work
+/// (for example, rescanning the model folder).
+#[derive(Clone)]
+pub struct EngineBridge(pub EngineHandle);
+
+impl Global for EngineBridge {}
+
+/// Installs the engine handle so settings buttons can talk to the controller.
+pub fn set_engine(cx: &mut App, engine: EngineHandle) {
+    cx.set_global(EngineBridge(engine));
+}
+
+/// Cloned engine handle, if installed.
+pub fn engine(cx: &App) -> Option<EngineHandle> {
+    cx.try_global::<EngineBridge>()
+        .map(|bridge| bridge.0.clone())
+}
+
+/// Current model library.
+pub fn models(cx: &App) -> Vec<ModelEntry> {
+    cx.try_global::<ModelLibrary>()
+        .map(|library| library.entries.clone())
+        .unwrap_or_default()
+}
+
+/// Friendly label for the selected model (alias, file stem or placeholder).
+pub fn model_label(cx: &App) -> String {
+    let cfg = current(cx);
+    let Some(path) = cfg.llm.model.as_ref() else {
+        return "Sin modelo".to_owned();
+    };
+    cfg.llm
+        .model_aliases
+        .get(&path.display().to_string())
+        .filter(|alias| !alias.trim().is_empty())
+        .cloned()
+        .unwrap_or_else(|| {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("modelo")
+                .to_owned()
+        })
+}
+
+/// Replaces the model library and refreshes observers.
+pub fn set_models(cx: &mut App, entries: Vec<ModelEntry>) {
+    cx.set_global(ModelLibrary { entries });
 }
 
 /// Returns a copy of the live configuration.

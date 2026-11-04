@@ -14,7 +14,7 @@ Este proyecto está diseñado **exclusivamente para hardware de gama media/antig
 ## 3. Arquitectura: crates y módulos
 El workspace tiene un binario mínimo (`src/main.rs`) y crates con responsabilidades separadas:
 
-- `crates/controller`: hilo del controlador (comandos, procesos, HTTP, generaciones, diagnóstico), muestreo CPU/RAM/VRAM (`system.rs`) y hardware (`hardware.rs`). Librería pura, sin GPUI.
+- `crates/controller`: hilo del controlador (comandos, procesos, HTTP, generaciones, diagnóstico), muestreo CPU/RAM/VRAM (`system.rs`), hardware (`hardware.rs`) y biblioteca de GGUF (`models.rs`). Librería pura, sin GPUI.
 - `crates/shared`: contrato UI ⇄ motores, configuración, texto y resolución de rutas. Es hoja.
 - `crates/llm_engine`: `llama-server` gestionado y modo externo OpenAI (`/v1/models`, SSE).
 - `crates/stt`: wrapper de `whisper-cli`. **Stub (M2).**
@@ -26,6 +26,7 @@ El workspace tiene un binario mínimo (`src/main.rs`) y crates con responsabilid
   - `app/sidebar.rs` — marca + 4 workspaces (Chat, Llamada, Estudio 3D, Ajustes).
   - `app/chat.rs`, `app/call.rs`, `app/studio.rs` — los tres workspaces.
   - `app/settings_page.rs` + `app/system.rs` — pestañas de Ajustes y panel de hardware.
+  - `settings/mcp.rs` — pestaña MCP (cliente pendiente).
   - `app/footer.rs` — estado del LLM, CPU/RAM/VRAM, micrófono y altavoz.
   - `settings/mod.rs` + `settings/{fields,llm,audio,scene3d,general}.rs` — una página por motor.
   - `settings/llm.rs` decide los campos según `LlmMode`: Local muestra binario/GGUF/host; Externo muestra endpoint/model id/API key. Nunca ambos.
@@ -103,7 +104,7 @@ Nota de estado: `llm_engine`, `shared`, `ui`, `controller` están implementados;
   `test/tests/`.
 - Para probar lógica privada, expón una API pública pequeña y documentada (ej.
   `shared::text::truncate_chars`, `ui::theme::parse_hex`), no dejes el test dentro del crate.
-- Comando: `cd test && cargo test` (53 tests; sin GPU, micrófono, modelos ni red externa).
+- Comando: `cd test && cargo test` (55 tests; sin GPU, micrófono, modelos ni red externa).
 - Lo que requiera hardware, modelos o latencia real va a `test/docs/hardware.md` como
   checklist manual, no como test automatizado.
 

@@ -10,10 +10,10 @@ pub mod text;
 pub mod tools;
 
 pub use config::{
-    AudioConfig, ConfigError, LlmConfig, LlmMode, PathsConfig, Scene3dConfig, SttConfig,
+    AudioConfig, ConfigError, LlmConfig, LlmMode, McpConfig, PathsConfig, Scene3dConfig, SttConfig,
     TtsBackend, TtsConfig, UiConfig, VadConfig, VoxConfig,
 };
 pub use event::{
-    DiagnosticItem, EngineCommand, EngineEvent, EngineHandle, LlmState, engine_channel,
+    DiagnosticItem, EngineCommand, EngineEvent, EngineHandle, LlmState, ModelEntry, engine_channel,
 };
 pub use text::for_speech;

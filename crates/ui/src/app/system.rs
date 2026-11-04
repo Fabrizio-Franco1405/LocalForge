@@ -131,7 +131,7 @@ impl VoxApp {
                                 .child("Pulsa «Comprobar» para validar binarios y modelos."),
                         )
                     })
-                    .children(diagnostics.iter().map(|item| hardware_card(item, cx))),
+                    .children(diagnostics.iter().map(|item| diagnostic_row(item, cx))),
             )
     }
 
@@ -192,5 +192,48 @@ fn hardware_card(item: &DiagnosticItem, cx: &App) -> impl IntoElement {
                 .text_sm()
                 .text_color(theme.foreground)
                 .child(item.value.clone()),
+        )
+}
+
+fn diagnostic_row(item: &DiagnosticItem, cx: &App) -> impl IntoElement {
+    let theme = cx.theme();
+    let color = if item.ok { theme.success } else { theme.danger };
+
+    div()
+        .flex()
+        .items_center()
+        .gap_3()
+        .px_3()
+        .py_2()
+        .border_b_1()
+        .border_color(theme.border)
+        .child(div().w(px(8.)).h(px(8.)).rounded_full().bg(color))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .flex_1()
+                .min_w(px(0.))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .text_color(theme.foreground)
+                        .child(item.name.clone()),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(item.value.clone()),
+                ),
+        )
+        .child(
+            div()
+                .text_xs()
+                .font_semibold()
+                .text_color(color)
+                .child(if item.ok { "OK" } else { "Falta" }),
         )
 }

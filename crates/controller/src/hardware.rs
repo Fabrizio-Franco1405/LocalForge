@@ -15,15 +15,21 @@ pub async fn collect(config: &VoxConfig) -> Vec<DiagnosticItem> {
     let mut items = base_items();
 
     let gpus = detect_gpus(config).await;
-    items.push(DiagnosticItem {
-        name: "GPU (Vulkan)".to_owned(),
-        value: if gpus.is_empty() {
-            "no detectada · instala el runtime Vulkan".to_owned()
-        } else {
-            gpus.join(" · ")
-        },
-        ok: !gpus.is_empty(),
-    });
+    if gpus.is_empty() {
+        items.push(DiagnosticItem {
+            name: "GPU (Vulkan)".to_owned(),
+            value: "no detectada · instala el runtime Vulkan".to_owned(),
+            ok: false,
+        });
+    } else {
+        for (index, gpu) in gpus.iter().enumerate() {
+            items.push(DiagnosticItem {
+                name: format!("GPU {} (Vulkan)", index + 1),
+                value: gpu.clone(),
+                ok: true,
+            });
+        }
+    }
 
     items.push(DiagnosticItem {
         name: "Backend de inferencia".to_owned(),
@@ -88,7 +94,7 @@ async fn detect_gpus(config: &VoxConfig) -> Vec<String> {
     if let Some(output) = run(&config.llm.binary, &["--list-devices"]).await {
         let devices = parse_llama_devices(&output);
         if !devices.is_empty() {
-            return devices;
+            return devices.iter().map(|line| compact_gpu(line)).collect();
         }
     }
 
@@ -164,4 +170,31 @@ pub fn parse_llama_devices(text: &str) -> Vec<String> {
         .filter(|line| !line.is_empty())
         .map(str::to_owned)
         .collect()
+}
+
+/// Shortens a `llama-server --list-devices` line to `name · total MiB`.
+///
+/// Example: `Vulkan0: AMD Radeon RX 5700 XT (RADV NAVI10) (8176 MiB, 494 MiB free)`
+/// becomes `AMD Radeon RX 5700 XT · 8176 MiB`.
+pub fn compact_gpu(line: &str) -> String {
+    let line = line
+        .split_once(':')
+        .map(|(_, rest)| rest)
+        .unwrap_or(line)
+        .trim();
+    let name = line.split(" (").next().unwrap_or(line).trim();
+
+    let total = line.split('(').find_map(|chunk| {
+        let chunk = chunk.trim();
+        if chunk.contains("MiB") {
+            chunk.split_whitespace().next()?.parse::<u64>().ok()
+        } else {
+            None
+        }
+    });
+
+    match total {
+        Some(mib) => format!("{name} · {mib} MiB"),
+        None => name.to_owned(),
+    }
 }

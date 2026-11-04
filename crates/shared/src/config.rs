@@ -10,6 +10,7 @@
 //! LOCALFORGE_AUDIO__VAD__MIN_SILENCE_MS=800
 //! ```
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use figment::providers::Format as _;
@@ -31,6 +32,8 @@ pub struct VoxConfig {
     pub ui: UiConfig,
     /// Local 3D generation engine (placeholder).
     pub scene3d: Scene3dConfig,
+    /// MCP client configuration (placeholder).
+    pub mcp: McpConfig,
     /// Filesystem locations.
     pub paths: PathsConfig,
 }
@@ -149,6 +152,10 @@ pub struct LlmConfig {
     pub binary: PathBuf,
     /// Absolute path to a `.gguf` model (managed mode).
     pub model: Option<PathBuf>,
+    /// Folder scanned for `.gguf` models (the dropdown library).
+    pub models_dir: Option<PathBuf>,
+    /// Friendly names keyed by the canonical model path.
+    pub model_aliases: BTreeMap<String, String>,
     /// Base URL for external mode, for example `http://127.0.0.1:11434/v1`.
     ///
     /// `127.0.0.1:9931` is accepted too; the scheme is added automatically.
@@ -188,6 +195,8 @@ impl Default for LlmConfig {
             mode: LlmMode::Managed,
             binary: PathBuf::from("llama-server"),
             model: None,
+            models_dir: None,
+            model_aliases: BTreeMap::new(),
             endpoint: String::new(),
             model_id: String::new(),
             api_key: String::new(),
@@ -505,6 +514,16 @@ impl Default for Scene3dConfig {
             extra_args: Vec::new(),
         }
     }
+}
+
+/// MCP client configuration (placeholder until the client exists).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct McpConfig {
+    /// Whether the MCP client should connect on startup.
+    pub enabled: bool,
+    /// SSE/HTTP endpoint of the MCP server.
+    pub endpoint: String,
 }
 
 /// Optional filesystem overrides.

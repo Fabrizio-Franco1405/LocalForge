@@ -6,13 +6,17 @@
 //! global config notifies its observers on every edit.
 
 use gpui_kit::Axis;
-use gpui_kit::component::setting::{SettingGroup, SettingItem, SettingPage};
-use shared::LlmMode;
+use gpui_kit::assets::IconName;
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::setting::{SettingField, SettingGroup, SettingItem, SettingPage};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _};
+use gpui_kit::*;
+use shared::{EngineCommand, LlmMode, ModelEntry, VoxConfig};
 
 use super::fields::*;
 
 /// Builds the LLM section for the selected mode.
-pub fn page(mode: LlmMode) -> SettingPage {
+pub fn page(mode: LlmMode, cfg: &VoxConfig, models: &[ModelEntry]) -> SettingPage {
     let page = SettingPage::new("Motor LLM")
         .description(
             "Conecta tu llama.cpp local o cualquier servidor compatible con OpenAI. \
@@ -22,7 +26,9 @@ pub fn page(mode: LlmMode) -> SettingPage {
         .group(connection_group(mode));
 
     let page = match mode {
-        LlmMode::Managed => page.group(managed_group()),
+        LlmMode::Managed => page
+            .group(library_group(cfg, models))
+            .group(managed_group()),
         LlmMode::External => page,
     };
 
@@ -70,7 +76,7 @@ fn connection_group(mode: LlmMode) -> SettingGroup {
             ))
             .item(
                 SettingItem::new(
-                    "Modelo GGUF",
+                    "Ruta manual (.gguf)",
                     path_field(
                         |cfg| cfg.llm.model.clone(),
                         |cfg, value| cfg.llm.model = value,
@@ -245,4 +251,168 @@ fn generation_group() -> SettingGroup {
             )
             .description("Se envía al inicio de cada conversación."),
         )
+}
+
+/// Model folder, scanned dropdown and per-model alias.
+fn library_group(cfg: &VoxConfig, models: &[ModelEntry]) -> SettingGroup {
+    let group = SettingGroup::new()
+        .title("Biblioteca de modelos")
+        .description("Escanéa una carpeta con tus .gguf y elige por alias; la ruta manual sigue disponible como salvavidas.")
+        .item(
+            SettingItem::new(
+                "Carpeta de modelos",
+                path_field(
+                    |cfg| cfg.llm.models_dir.clone(),
+                    |cfg, value| cfg.llm.models_dir = value,
+                ),
+            )
+            .description("LocalForge busca .gguf en esta carpeta y sus subcarpetas.")
+            .layout(Axis::Vertical),
+        )
+        .item(path_picker(
+            "Carpeta de modelos",
+            Pick::Folder,
+            |cfg| cfg.llm.models_dir.clone(),
+            |cfg, value| cfg.llm.models_dir = value,
+        ))
+        .item(scan_button());
+
+    if models.is_empty() {
+        return group.item(
+            SettingItem::new(
+                "Modelos encontrados",
+                SettingField::render(|_, _, _| {
+                    gpui_kit::div()
+                        .text_xs()
+                        .child("Sin modelos todavía: elige la carpeta y pulsa «Escanear».")
+                }),
+            )
+            .description("La lista se rellena tras escanear la carpeta."),
+        );
+    }
+
+    let mut options = Vec::with_capacity(models.len());
+    for entry in models {
+        let label = model_label(cfg, entry);
+        let display = if label == entry.name {
+            format!("{label} · {} MB", entry.size_mb)
+        } else {
+            format!("{label} · {} · {} MB", entry.name, entry.size_mb)
+        };
+        options.push((
+            SharedString::from(entry.path.clone()),
+            SharedString::from(display),
+        ));
+    }
+
+    group
+        .item(
+            SettingItem::new(
+                "Modelo instalado",
+                SettingField::dropdown(
+                    options,
+                    {
+                        let models = models.to_vec();
+                        move |cx: &App| {
+                            let cfg = crate::config::current(cx);
+                            cfg.llm
+                                .model
+                                .as_ref()
+                                .map(|path| SharedString::from(path.display().to_string()))
+                                .unwrap_or_else(|| {
+                                    models
+                                        .first()
+                                        .map(|entry| SharedString::from(entry.path.clone()))
+                                        .unwrap_or_default()
+                                })
+                        }
+                    },
+                    |value: SharedString, cx: &mut App| {
+                        let path = std::path::PathBuf::from(value.to_string());
+                        crate::config::update(cx, |cfg| {
+                            let stem = path
+                                .file_stem()
+                                .and_then(|stem| stem.to_str())
+                                .unwrap_or("modelo")
+                                .to_owned();
+                            cfg.llm
+                                .model_aliases
+                                .entry(path.display().to_string())
+                                .or_insert(stem);
+                            cfg.llm.model = Some(path);
+                            cfg.llm.model_id.clear();
+                        });
+                    },
+                ),
+            )
+            .description("Cambiar aquí y pulsar Aplicar reinicia llama-server con ese GGUF."),
+        )
+        .item(
+            SettingItem::new(
+                "Alias del modelo",
+                text_field(current_alias, |cfg, value| {
+                    if let Some(path) = cfg.llm.model.clone() {
+                        cfg.llm
+                            .model_aliases
+                            .insert(path.display().to_string(), value.trim().to_owned());
+                    }
+                }),
+            )
+            .description(
+                "Nombre corto que verás en Ajustes y en el chat; el archivo real no cambia.",
+            ),
+        )
+}
+
+fn scan_button() -> SettingItem {
+    SettingItem::render(|_options, _window, cx| {
+        let theme = cx.theme();
+        gpui_kit::div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                Button::new("scan-models")
+                    .small()
+                    .ghost()
+                    .icon(IconName::RefreshCw)
+                    .label("Escanear")
+                    .on_click(|_, _, cx| {
+                        if let Some(engine) = crate::config::engine(cx) {
+                            engine.send(EngineCommand::ScanModels);
+                        }
+                    }),
+            )
+            .child(
+                gpui_kit::div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child("También se escanea al aplicar cambios."),
+            )
+    })
+}
+
+fn model_label(cfg: &VoxConfig, entry: &ModelEntry) -> String {
+    cfg.llm
+        .model_aliases
+        .get(&entry.path)
+        .filter(|alias| !alias.trim().is_empty())
+        .cloned()
+        .unwrap_or_else(|| entry.name.clone())
+}
+
+fn current_alias(cfg: &VoxConfig) -> String {
+    let Some(path) = cfg.llm.model.as_ref() else {
+        return String::new();
+    };
+    cfg.llm
+        .model_aliases
+        .get(&path.display().to_string())
+        .cloned()
+        .unwrap_or_else(|| {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("modelo")
+                .to_owned()
+        })
 }

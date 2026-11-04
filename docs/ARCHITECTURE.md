@@ -51,7 +51,7 @@ ejercitarlo sin display.
 | --- | --- | --- |
 | `shared` | Implementado | Config TOML/`LOCALFORGE_*` (legado `VOXLOCAL_*`), eventos, `for_speech`, `truncate_chars`, binarios |
 | `llm_engine` | Implementado | `build_args`, spawn/kill, health, SSE, `usage`, modo `External` con `/v1/models` |
-| `controller` | Implementado | Comandos, generaciones, probe, historial, diagnóstico, apagado y muestreo CPU/RAM (`system.rs`) |
+| `controller` | Implementado | Comandos, generaciones, probe, historial, diagnóstico, CPU/RAM/VRAM (`system.rs`), hardware (`hardware.rs`) y escaneo de GGUF (`models.rs`) |
 | `ui` | Implementado | Workspaces Chat/Llamada/Estudio 3D/Ajustes, footer de recursos y Ajustes por pestañas |
 | `stt` | Stub (M2) | Contrato documentado en `crates/stt/src/lib.rs` |
 | `tts` | Stub (M3) | Contrato documentado en `crates/tts/src/lib.rs` |
@@ -196,6 +196,8 @@ pub fn spawn(config: VoxConfig) -> EngineHandle;
   detects a server started outside LocalForge. With an empty endpoint it
   reports a clear error instead of probing the local port.
 - `ProbeHardware` collects OS/CPU/RAM/GPU/tools and emits `EngineEvent::Hardware`.
+- `ScanModels` walks `llm.models_dir` (following file symlinks) and emits
+  `EngineEvent::Models` for the alias-aware library.
 - `SystemUsage` (CPU, RAM, VRAM, app memory) is sampled every 2 s in an
   independent task, so values are visible even while a model is loading.
 - Emits only [`EngineEvent`]; the UI never calls an engine directly.
@@ -355,8 +357,8 @@ navegación.
   test, se expone una API pública mínima y documentada
   (`shared::text::truncate_chars`, `llm_engine::{take_sse_payloads, parse_delta}`,
   `ui::theme::parse_hex`).
-- Comando: `cd test && cargo test`. Cubre `shared` (24), `llm_engine` (11), `system` (6),
-  `ui` (8), el controlador (2), sistema (6) y frontera (2): 53 tests sin GPU, micrófono, modelos ni red
+- Comando: `cd test && cargo test`. Cubre `shared` (24), `llm_engine` (11), `system` (8),
+  `ui` (8), el controlador (2), sistema (8) y frontera (2): 55 tests sin GPU, micrófono, modelos ni red
   externa. El controlador se prueba contra un servidor OpenAI falso en loopback.
 - Lo que requiere hardware, modelos o latencia real es checklist manual
   (`test/docs/hardware.md`), no un test automatizado.
@@ -405,3 +407,17 @@ Multiplataforma:
 - `rfd` abre los selectores nativos en las tres plataformas.
 - `resolve_binary` respeta `PATHEXT` en Windows; los hijos usan `kill_on_drop`.
 - Prohibido `unsafe`: el proyecto no enlaza APIs de driver.
+
+## 14. Biblioteca de modelos y adjuntos
+
+- El escaneo vive en `controller::models`: recursivo, límite de profundidad y
+  500 entradas, sin seguir directorios simbólicos (solo archivos, para no
+  romper el caché de Hugging Face ni entrar en bucles).
+- Los alias se guardan en `LlmConfig.model_aliases` (ruta → nombre corto). El
+  archivo real nunca se renombra.
+- La ruta manual sigue existiendo: si un alias apunta a un archivo movido, el
+  usuario puede seleccionar otro o pegar la ruta.
+- El chat adjunta archivos de texto al prompt (máximo 8 000 caracteres por
+  archivo, `truncate_chars`); los binarios solo aportan su ruta.
+- MCP tiene pestaña y configuración (`McpConfig`), pero es un placeholder hasta
+  implementar JSON-RPC/SSE; la UI lo dice explícitamente.

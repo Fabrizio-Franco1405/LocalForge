@@ -6,6 +6,7 @@ use gpui_kit::*;
 
 use crate::app::{SettingsTab, VoxApp};
 use crate::settings;
+use gpui_kit::assets::IconName;
 
 impl VoxApp {
     pub(super) fn settings_page(&mut self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -39,7 +40,10 @@ impl VoxApp {
     }
 
     fn tab_button(&self, tab: SettingsTab, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let button = Button::new(tab.id()).small().label(tab.label());
+        let button = Button::new(tab.id())
+            .small()
+            .icon(tab_icon(tab))
+            .label(tab.label());
         let button = if self.settings_tab == tab {
             button.primary()
         } else {
@@ -53,5 +57,16 @@ impl VoxApp {
             }
             cx.notify();
         }))
+    }
+}
+
+fn tab_icon(tab: SettingsTab) -> IconName {
+    match tab {
+        SettingsTab::Llm => IconName::Bot,
+        SettingsTab::Audio => IconName::Mic,
+        SettingsTab::Scene3d => IconName::Cuboid,
+        SettingsTab::General => IconName::SlidersHorizontal,
+        SettingsTab::System => IconName::CircuitBoard,
+        SettingsTab::Mcp => IconName::Plug,
     }
 }

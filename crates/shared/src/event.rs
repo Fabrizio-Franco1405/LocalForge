@@ -74,6 +74,8 @@ pub enum EngineCommand {
     ProbeTools,
     /// Ask the controller for a hardware/system report.
     ProbeHardware,
+    /// Rescan the configured models folder.
+    ScanModels,
     /// Re-probe the LLM endpoint and refresh its live status.
     ProbeLlm,
     /// Stop all processes and end the controller loop.
@@ -89,6 +91,17 @@ pub struct DiagnosticItem {
     pub value: String,
     /// Whether the check passed.
     pub ok: bool,
+}
+
+/// A `.gguf` model found by the scanner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelEntry {
+    /// Absolute path.
+    pub path: String,
+    /// File stem, used when there is no alias.
+    pub name: String,
+    /// File size in MiB.
+    pub size_mb: u64,
 }
 
 /// Notifications the controller sends to the UI.
@@ -159,6 +172,11 @@ pub enum EngineEvent {
     Hardware {
         /// Checks and detected components, in display order.
         items: Vec<DiagnosticItem>,
+    },
+    /// Model library found on disk.
+    Models {
+        /// Discovered `.gguf` files.
+        entries: Vec<ModelEntry>,
     },
     /// A recoverable error. The operation that produced it is finished.
     Error {

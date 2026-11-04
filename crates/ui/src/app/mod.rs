@@ -91,6 +91,8 @@ pub enum SettingsTab {
     General,
     /// Hardware and detected tools.
     System,
+    /// MCP connections (placeholder).
+    Mcp,
 }
 
 impl SettingsTab {
@@ -102,6 +104,7 @@ impl SettingsTab {
             Self::Scene3d => "Motor 3D",
             Self::General => "General",
             Self::System => "Sistema",
+            Self::Mcp => "MCP",
         }
     }
 
@@ -113,16 +116,18 @@ impl SettingsTab {
             Self::Scene3d => "scene3d",
             Self::General => "general",
             Self::System => "system",
+            Self::Mcp => "mcp",
         }
     }
 
     /// All tabs, in display order.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Llm,
         Self::Audio,
         Self::Scene3d,
         Self::General,
         Self::System,
+        Self::Mcp,
     ];
 }
 
@@ -154,6 +159,8 @@ pub struct VoxApp {
     hardware: Vec<DiagnosticItem>,
     hardware_loaded: bool,
     studio_image: Option<PathBuf>,
+    attachments: Vec<PathBuf>,
+    model_menu: bool,
     diagnostics: Vec<DiagnosticItem>,
     probing: bool,
     notice: Option<String>,
@@ -220,6 +227,8 @@ impl VoxApp {
             hardware: Vec::new(),
             hardware_loaded: false,
             studio_image: None,
+            attachments: Vec::new(),
+            model_menu: false,
             diagnostics: Vec::new(),
             probing: false,
             notice: None,
@@ -245,7 +254,7 @@ impl VoxApp {
 
         let events = self.engine.drain();
         for event in events {
-            changed |= self.handle_event(event);
+            changed |= self.handle_event(event, cx);
         }
 
         if changed {
@@ -253,7 +262,7 @@ impl VoxApp {
         }
     }
 
-    fn handle_event(&mut self, event: EngineEvent) -> bool {
+    fn handle_event(&mut self, event: EngineEvent, cx: &mut Context<Self>) -> bool {
         match event {
             EngineEvent::Llm { state, detail } => {
                 self.llm = state;
@@ -334,6 +343,10 @@ impl VoxApp {
                 self.vram_total_mb = vram_total_mb;
                 true
             }
+            EngineEvent::Models { entries } => {
+                config::set_models(cx, entries);
+                true
+            }
             EngineEvent::Hardware { items } => {
                 self.hardware = items;
                 self.hardware_loaded = true;
@@ -350,6 +363,7 @@ impl VoxApp {
     }
 
     fn send_prompt(&mut self, text: String) {
+        let text = self.with_attachments(text);
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
 

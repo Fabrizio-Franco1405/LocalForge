@@ -9,6 +9,7 @@
 //! a `llama-server` started outside LocalForge is detected and used directly.
 
 pub mod hardware;
+pub mod models;
 pub mod system;
 
 use std::sync::Arc;
@@ -480,6 +481,7 @@ impl Controller {
                 self.config = *config;
                 self.resolved_model.clear();
                 self.llm = None;
+                self.scan_models();
                 self.refresh(true).await;
             }
             EngineCommand::ProbeLlm => {
@@ -518,6 +520,7 @@ impl Controller {
             }
             EngineCommand::ProbeTools => self.emit_diagnostics().await,
             EngineCommand::ProbeHardware => self.emit_hardware().await,
+            EngineCommand::ScanModels => self.scan_models(),
             EngineCommand::Shutdown => return false,
         }
 
@@ -641,6 +644,18 @@ impl Controller {
                 self.emit(EngineEvent::ReplyDone { generation, text });
             }
         }
+    }
+
+    /// Scans the configured folder and publishes the model library.
+    fn scan_models(&mut self) {
+        let dir = self
+            .config
+            .llm
+            .models_dir
+            .clone()
+            .unwrap_or_else(|| self.config.assets_dir().join("models").join("llm"));
+        let entries = models::scan(&dir);
+        self.emit(EngineEvent::Models { entries });
     }
 
     async fn emit_hardware(&mut self) {

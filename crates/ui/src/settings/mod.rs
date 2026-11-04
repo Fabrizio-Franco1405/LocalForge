@@ -9,6 +9,7 @@ pub mod fields;
 mod audio;
 mod general;
 mod llm;
+mod mcp;
 mod scene3d;
 
 use gpui_kit::component::setting::Settings;
@@ -19,15 +20,20 @@ use crate::config;
 
 /// Builds the settings panel for one section.
 pub fn view(cx: &App, tab: SettingsTab) -> impl IntoElement {
-    let mode = config::current(cx).llm.mode;
+    let cfg = config::current(cx);
+    let models = config::models(cx);
 
     let (id, pages) = match tab {
-        SettingsTab::Llm => ("localforge-settings-llm", vec![llm::page(mode)]),
+        SettingsTab::Llm => (
+            "localforge-settings-llm",
+            vec![llm::page(cfg.llm.mode, &cfg, &models)],
+        ),
         SettingsTab::Audio => ("localforge-settings-audio", vec![audio::page()]),
         SettingsTab::Scene3d => ("localforge-settings-scene3d", vec![scene3d::page()]),
         SettingsTab::General | SettingsTab::System => {
             ("localforge-settings-general", vec![general::page()])
         }
+        SettingsTab::Mcp => ("localforge-settings-mcp", vec![mcp::page()]),
     };
 
     div().id("settings-page").size_full().p_5().child(
