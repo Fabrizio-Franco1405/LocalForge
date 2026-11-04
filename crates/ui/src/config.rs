@@ -79,6 +79,14 @@ pub fn update(cx: &mut App, f: impl FnOnce(&mut VoxConfig)) {
         global.path.clone()
     };
     persist(cx, &config_path);
+
+    // Apply appearance live so accent, radius, font size, etc. take effect
+    // immediately without restarting the app.
+    let ui = cx.global::<GlobalConfig>().config.ui.clone();
+    crate::theme::apply(cx, &ui, None);
+
+    // Force every view to re-render so the new colors take effect.
+    cx.refresh_windows();
 }
 
 /// Writes the current configuration to `path`.

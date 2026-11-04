@@ -239,8 +239,6 @@ impl LlamaManager {
             config.gpu_layers.to_string(),
             "--threads".to_owned(),
             config.threads.to_string(),
-            "--jinja".to_owned(),
-            "--no-webui".to_owned(),
         ];
 
         args.extend(config.extra_args.iter().cloned());
@@ -734,15 +732,6 @@ mod tests {
         }
     }
 
-    fn parse_usage(payload: &str) -> Option<u32> {
-        let value: serde_json::Value = serde_json::from_str(payload).ok()?;
-        value
-            .get("usage")?
-            .get("total_tokens")?
-            .as_u64()
-            .map(|v| v as u32)
-    }
-
     #[test]
     fn build_args_requires_a_model() {
         let mut config = configured();
@@ -763,8 +752,8 @@ mod tests {
         assert!(joined.contains("--gpu-layers 99"));
         assert!(joined.contains("--ctx-size 4096"));
         assert!(joined.contains("--threads 8"));
-        assert!(joined.contains("--jinja"));
-        assert!(joined.contains("--no-webui"));
+        assert!(!joined.contains("--jinja"));
+        assert!(!joined.contains("--no-webui"));
     }
 
     #[test]

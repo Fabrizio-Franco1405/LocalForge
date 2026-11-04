@@ -416,22 +416,15 @@ impl Default for UiConfig {
 }
 
 impl UiConfig {
-    /// Effective accent color as `#rrggbb`.
     pub fn accent_hex(&self) -> String {
         match self.accent.as_str() {
+            "violet" => "#7c5cff".to_owned(),
             "blue" => "#3b82f6".to_owned(),
             "emerald" => "#10b981".to_owned(),
             "amber" => "#f59e0b".to_owned(),
             "rose" => "#f43f5e".to_owned(),
-            "custom" => {
-                let custom = self.accent_custom.trim();
-                if custom.starts_with('#') && (custom.len() == 7 || custom.len() == 4) {
-                    custom.to_owned()
-                } else {
-                    "#7c5cff".to_owned()
-                }
-            }
-            _ => "#7c5cff".to_owned(),
+            "custom" => self.accent_custom.clone(), // Si es custom, usa el campo de texto
+            _ => "#7c5cff".to_owned(),              // Por defecto, violeta
         }
     }
 }

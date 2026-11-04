@@ -203,6 +203,7 @@ where
         move |value: SharedString, cx: &mut App| {
             let value = value.to_string();
             config::update(cx, |cfg| set(cfg, value));
+            cx.refresh_windows(); // <--- AÑADE ESTA LÍNEA AQUÍ
         },
     )
 }

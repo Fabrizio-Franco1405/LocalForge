@@ -48,6 +48,7 @@ pub fn apply(cx: &mut App, ui: &UiConfig, window: Option<&mut Window>) {
         theme.radius_lg = px((radius + 4.0).min(24.0));
         theme.font_size = px(font_size);
     });
+    cx.refresh_windows();
 }
 
 /// Parses `#rgb` or `#rrggbb`.

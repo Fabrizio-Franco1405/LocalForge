@@ -83,6 +83,7 @@ impl VoxApp {
         let _config_sub = cx.observe_global::<config::GlobalConfig>(|_, cx| {
             let ui = config::current(cx).ui;
             crate::theme::apply(cx, &ui, None);
+            cx.refresh_windows();
             cx.notify();
         });
 
@@ -275,6 +276,13 @@ impl VoxApp {
         let cfg = config::current(cx);
         self.engine.send(EngineCommand::ReloadConfig(Box::new(cfg)));
         cx.global_mut::<config::GlobalConfig>().mark_applied();
+
+        // 1. Extraemos la configuración de la UI a su propia variable
+        let ui_config = config::current(cx).ui;
+
+        // 2. Ahora pasamos la referencia a esa variable, no a cx
+        crate::theme::apply(cx, &ui_config, Some(window));
+        cx.refresh_windows();
 
         if let Some(error) = cx.global::<config::GlobalConfig>().save_error.clone() {
             window.push_notification(Notification::error(error), cx);
