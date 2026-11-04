@@ -14,7 +14,7 @@ Este proyecto está diseñado **exclusivamente para hardware de gama media/antig
 ## 3. Arquitectura: crates y módulos
 El workspace tiene un binario mínimo (`src/main.rs`) y crates con responsabilidades separadas:
 
-- `crates/controller`: hilo del controlador (comandos, procesos, HTTP, generaciones, diagnóstico). Librería pura, sin GPUI.
+- `crates/controller`: hilo del controlador (comandos, procesos, HTTP, generaciones, diagnóstico) y muestreo de CPU/RAM (`system.rs`). Librería pura, sin GPUI.
 - `crates/shared`: contrato UI ⇄ motores, configuración, texto y resolución de rutas. Es hoja.
 - `crates/llm_engine`: `llama-server` gestionado y modo externo OpenAI (`/v1/models`, SSE).
 - `crates/stt`: wrapper de `whisper-cli`. **Stub (M2).**
@@ -31,6 +31,8 @@ El workspace tiene un binario mínimo (`src/main.rs`) y crates con responsabilid
 **Regla de oro:** La UI (`crates/ui`) no debe saber cómo se lanza `llama-server`. Solo envía `EngineCommand` y pinta `EngineEvent`. La lógica de negocio no depende de GPUI.
 
 **Regla de tamaño:** ningún archivo de UI debe volver a pasar de ~500 líneas; una página o grupo de widgets por módulo.
+
+**Regla de frontera:** el core no importa GPUI. La UI consume `EngineCommand`/`EngineEvent`; sustituirla por JS/TS o Python es implementar ese protocolo, no tocar los motores. `test/tests/boundary.rs` lo verifica.
 
 Nota de estado: `llm_engine`, `shared`, `ui`, `controller` están implementados; `stt`, `tts`, `audio_engine` y `scene3d` compilan como placeholders con su contrato en el docstring. No añadas funcionalidad simulada: implementa el crate o deja el stub honesto.
 
@@ -97,7 +99,7 @@ Nota de estado: `llm_engine`, `shared`, `ui`, `controller` están implementados;
   `test/tests/`.
 - Para probar lógica privada, expón una API pública pequeña y documentada (ej.
   `shared::text::truncate_chars`, `ui::theme::parse_hex`), no dejes el test dentro del crate.
-- Comando: `cd test && cargo test` (44 tests; sin GPU, micrófono, modelos ni red externa).
+- Comando: `cd test && cargo test` (51 tests; sin GPU, micrófono, modelos ni red externa).
 - Lo que requiera hardware, modelos o latencia real va a `test/docs/hardware.md` como
   checklist manual, no como test automatizado.
 

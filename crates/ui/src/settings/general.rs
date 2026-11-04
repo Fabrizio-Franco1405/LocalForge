@@ -1,13 +1,14 @@
 //! General section: appearance, paths and diagnostics entry point.
 
+use gpui_kit::Axis;
 use gpui_kit::component::setting::{SettingGroup, SettingItem, SettingPage};
 
 use super::fields::*;
 
 /// Builds the general section.
 pub fn page() -> SettingPage {
-    SettingPage::new("General")
-        .description("Apariencia, rutas y diagnóstico del entorno. Nada se descarga ni se instala.")
+    SettingPage::new("Ajustes")
+        .description("Apariencia (tema, color de acento, tipografía), rutas y diagnóstico. Nada se descarga ni se instala.")
         .default_open(true)
         .group(
             SettingGroup::new()
@@ -85,7 +86,8 @@ pub fn page() -> SettingPage {
                             },
                         ),
                     )
-                    .description("Vacío = carpeta estándar del sistema."),
+                    .description("Vacío = carpeta estándar del sistema.")
+                    .layout(Axis::Vertical),
                 )
                 .item(path_picker(
                     "Carpeta de datos",

@@ -5,6 +5,7 @@
 //! API key. Switching the dropdown rebuilds the page immediately because the
 //! global config notifies its observers on every edit.
 
+use gpui_kit::Axis;
 use gpui_kit::component::setting::{SettingGroup, SettingItem, SettingPage};
 use shared::LlmMode;
 
@@ -54,7 +55,8 @@ fn connection_group(mode: LlmMode) -> SettingGroup {
                         |cfg, value| cfg.llm.binary = value.trim().into(),
                     ),
                 )
-                .description("Nombre en PATH o ruta absoluta a tu compilación Vulkan."),
+                .description("Nombre en PATH o ruta absoluta a tu compilación Vulkan.")
+                .layout(Axis::Vertical),
             )
             .item(path_picker(
                 "llama-server",
@@ -74,7 +76,8 @@ fn connection_group(mode: LlmMode) -> SettingGroup {
                         |cfg, value| cfg.llm.model = value,
                     ),
                 )
-                .description("Ruta absoluta al .gguf que quieras cargar."),
+                .description("Ruta absoluta al .gguf que quieras cargar.")
+                .layout(Axis::Vertical),
             )
             .item(path_picker(
                 "Modelo GGUF",
@@ -94,7 +97,8 @@ fn connection_group(mode: LlmMode) -> SettingGroup {
                 .description(
                     "URL completa (http://127.0.0.1:11434/v1) o solo host:puerto. \
                      «Probar conexión» aplica y sondea /v1/models.",
-                ),
+                )
+                .layout(Axis::Vertical),
             )
             .item(
                 SettingItem::new(
@@ -217,7 +221,7 @@ fn generation_group() -> SettingGroup {
                 0.0,
                 2.0,
                 0.05,
-                |cfg| f64::from(cfg.llm.temperature),
+                |cfg| (f64::from(cfg.llm.temperature) * 100.0).round() / 100.0,
                 |cfg, value| cfg.llm.temperature = value as f32,
             ),
         ))

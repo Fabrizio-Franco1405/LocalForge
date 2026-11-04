@@ -51,7 +51,7 @@ ejercitarlo sin display.
 | --- | --- | --- |
 | `shared` | Implementado | Config TOML/`LOCALFORGE_*` (legado `VOXLOCAL_*`), eventos, `for_speech`, `truncate_chars`, binarios |
 | `llm_engine` | Implementado | `build_args`, spawn/kill, health, SSE, `usage`, modo `External` con `/v1/models` |
-| `controller` | Implementado | Comandos, generaciones, probe, historial, diagnóstico, apagado |
+| `controller` | Implementado | Comandos, generaciones, probe, historial, diagnóstico, apagado y muestreo CPU/RAM (`system.rs`) |
 | `ui` | Implementado | Sidebar LLM/Audio/3D/General, chat, diagnóstico, ajustes por sección |
 | `stt` | Stub (M2) | Contrato documentado en `crates/stt/src/lib.rs` |
 | `tts` | Stub (M3) | Contrato documentado en `crates/tts/src/lib.rs` |
@@ -352,11 +352,36 @@ navegación.
   test, se expone una API pública mínima y documentada
   (`shared::text::truncate_chars`, `llm_engine::{take_sse_payloads, parse_delta}`,
   `ui::theme::parse_hex`).
-- Comando: `cd test && cargo test`. Cubre `shared` (24), `llm_engine` (11),
-  `ui` (7) y el controlador (2): 44 tests sin GPU, micrófono, modelos ni red
+- Comando: `cd test && cargo test`. Cubre `shared` (24), `llm_engine` (11), `system` (5),
+  `ui` (7), el controlador (2), sistema (5) y frontera (2): 51 tests sin GPU, micrófono, modelos ni red
   externa. El controlador se prueba contra un servidor OpenAI falso en loopback.
 - Lo que requiere hardware, modelos o latencia real es checklist manual
   (`test/docs/hardware.md`), no un test automatizado.
 - Consecuencia asumida: al no versionarse, la suite no protege PRs remotos; es
   una red de seguridad local. Para CI con tests habría que versionar un espejo
   o reconstruir la carpeta en el workflow.
+
+## 12. Frontera UI ⇄ core (UI-agnóstica)
+
+El core (`shared`, `llm_engine`, `controller`, `stt`, `tts`, `audio_engine`,
+`scene3d`) no depende de GPUI. La única superficie entre la UI y el core es:
+
+```text
+EngineHandle::send(EngineCommand)  ->  controller thread  ->  motores
+EngineHandle::drain()/try_recv()   <-  EngineEvent
+```
+
+Consecuencias:
+
+- Cambiar la UI (JS/TS, Python, web) es implementar ese protocolo, no tocar los
+  motores. Un adaptador IPC (JSON Lines o WebSocket) sobre `EngineHandle`
+  habilita cualquier front-end.
+- `EngineEvent` es `Clone + Send + 'static` y solo contiene primitivas (`u64`,
+  `String`, `f32`, `Option<...>`), nunca tipos de GPUI.
+- Los recursos del host viajan como `EngineEvent::SystemUsage`, muestreados en
+  `controller::system` con una tarea propia: la UI solo pinta.
+- `test/tests/boundary.rs` falla si un crate core añade `gpui` a su manifiesto o
+  importa GPUI en el código. Es una regla ejecutable, no una convención.
+
+Si en el futuro se extrae el core a otro lenguaje, el contrato a conservar es
+exactamente `EngineCommand`/`EngineEvent` más los tipos de `shared::config`.

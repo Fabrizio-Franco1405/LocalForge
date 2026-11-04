@@ -11,12 +11,11 @@
 
 use std::time::Duration;
 
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Sizable as _, StyledExt as _, WindowExt as _,
-};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use shared::{DiagnosticItem, EngineCommand, EngineEvent, EngineHandle, LlmMode, LlmState};
@@ -55,7 +54,7 @@ impl Page {
             Self::Llm => "Motor LLM",
             Self::Audio => "Motor Audio",
             Self::Scene3d => "Motor 3D",
-            Self::General => "General",
+            Self::General => "Ajustes",
             Self::Tools => "Diagnóstico",
         }
     }
@@ -100,6 +99,10 @@ pub struct VoxApp {
     streaming: Option<u64>,
     listening: bool,
     level: f32,
+    cpu: Option<f32>,
+    ram_used_mb: Option<u64>,
+    ram_total_mb: Option<u64>,
+    app_mb: Option<u64>,
     diagnostics: Vec<DiagnosticItem>,
     probing: bool,
     notice: Option<String>,
@@ -153,6 +156,10 @@ impl VoxApp {
             streaming: None,
             listening: false,
             level: 0.0,
+            cpu: None,
+            ram_used_mb: None,
+            ram_total_mb: None,
+            app_mb: None,
             diagnostics: Vec::new(),
             probing: false,
             notice: None,
@@ -243,6 +250,18 @@ impl VoxApp {
             EngineEvent::ContextUsage { used, total } => {
                 self.context_used = used;
                 self.context_total = total;
+                true
+            }
+            EngineEvent::SystemUsage {
+                cpu_percent,
+                ram_total_mb,
+                ram_used_mb,
+                app_mb,
+            } => {
+                self.cpu = cpu_percent;
+                self.ram_total_mb = ram_total_mb;
+                self.ram_used_mb = ram_used_mb;
+                self.app_mb = app_mb;
                 true
             }
             EngineEvent::Error { scope, message } => {
@@ -345,6 +364,18 @@ impl VoxApp {
         cx.notify();
     }
 
+    fn start_engine(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.engine.send(EngineCommand::StartLlm);
+        window.push_notification(Notification::info("Arrancando el motor local…"), cx);
+        cx.notify();
+    }
+
+    fn stop_engine(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.engine.send(EngineCommand::StopLlm);
+        window.push_notification(Notification::info("Motor local detenido"), cx);
+        cx.notify();
+    }
+
     fn restart_engine(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.engine.send(EngineCommand::RestartLlm);
         window.push_notification(Notification::info("Reiniciando el motor…"), cx);
@@ -429,22 +460,11 @@ impl VoxApp {
                             Button::new("open-tools")
                                 .small()
                                 .ghost()
+                                .icon(IconName::Activity)
                                 .label("Diagnóstico")
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.page = Page::Tools;
                                     this.probe(cx);
-                                })),
-                        )
-                    })
-                    .when(self.page != Page::Chat, |this| {
-                        this.child(
-                            Button::new("back-chat")
-                                .small()
-                                .ghost()
-                                .label("Conversación")
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.page = Page::Chat;
-                                    cx.notify();
                                 })),
                         )
                     })
@@ -453,34 +473,87 @@ impl VoxApp {
                             Button::new("new-chat")
                                 .small()
                                 .ghost()
-                                .label("Nueva conversación")
+                                .icon(IconName::MessageSquare)
+                                .label("Nueva")
                                 .on_click(cx.listener(|this, _, _, cx| this.clear_chat(cx))),
                         )
-                        .child(
+                    })
+                    .when(
+                        matches!(self.page, Page::Chat | Page::Llm)
+                            && config::current(cx).llm.mode == LlmMode::Managed,
+                        |this| {
+                            if matches!(self.llm, LlmState::Ready | LlmState::Starting) {
+                                this.child(
+                                    Button::new("stop-llm")
+                                        .small()
+                                        .ghost()
+                                        .icon(IconName::Square)
+                                        .label("Apagar")
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.stop_engine(window, cx)
+                                        })),
+                                )
+                            } else {
+                                this.child(
+                                    Button::new("start-llm")
+                                        .small()
+                                        .primary()
+                                        .icon(IconName::Play)
+                                        .label("Encender")
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.start_engine(window, cx)
+                                        })),
+                                )
+                            }
+                        },
+                    )
+                    .when(self.page == Page::Llm, |this| {
+                        this.child(
                             Button::new("restart-llm")
                                 .small()
                                 .ghost()
-                                .label("Reiniciar motor")
+                                .icon(IconName::RotateCw)
+                                .label("Reiniciar")
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.restart_engine(window, cx)
                                 })),
                         )
                     })
-                    .child(
-                        Button::new("header-probe")
-                            .small()
-                            .ghost()
-                            .label("Probar conexión")
-                            .on_click(cx.listener(|this, _, _, cx| this.probe_connection(cx))),
-                    )
-                    .child(
-                        Button::new("header-apply")
-                            .small()
-                            .primary()
-                            .label(if dirty { "Aplicar cambios" } else { "Aplicado" })
-                            .disabled(!dirty)
-                            .on_click(cx.listener(|this, _, window, cx| this.apply(window, cx))),
-                    ),
+                    .when(self.page != Page::Chat, |this| {
+                        this.child(
+                            Button::new("back-chat")
+                                .small()
+                                .ghost()
+                                .icon(IconName::MessageSquare)
+                                .label("Chat")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.page = Page::Chat;
+                                    cx.notify();
+                                })),
+                        )
+                    })
+                    .when(matches!(self.page, Page::Chat | Page::Llm), |this| {
+                        this.child(
+                            Button::new("header-probe")
+                                .small()
+                                .ghost()
+                                .icon(IconName::RefreshCw)
+                                .label("Probar")
+                                .on_click(cx.listener(|this, _, _, cx| this.probe_connection(cx))),
+                        )
+                    })
+                    .when(dirty, |this| {
+                        this.child(
+                            Button::new("header-apply")
+                                .small()
+                                .primary()
+                                .icon(IconName::Check)
+                                .label("Aplicar")
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.apply(window, cx)),
+                                ),
+                        )
+                    }),
             )
     }
 }

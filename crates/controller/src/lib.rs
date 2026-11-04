@@ -8,6 +8,8 @@
 //! The LLM state is never assumed: every change comes from an HTTP probe, so
 //! a `llama-server` started outside LocalForge is detected and used directly.
 
+pub mod system;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -19,6 +21,7 @@ use shared::{
     DiagnosticItem, EngineCommand, EngineEvent, EngineHandle, LlmMode, LlmState, TtsBackend,
     VoxConfig, engine_channel,
 };
+use system::SystemSampler;
 use tokio::sync::mpsc;
 
 /// Completion notices produced by background stream readers.
@@ -97,6 +100,29 @@ impl Controller {
 
     async fn run(mut self) {
         self.set_state(LlmState::Stopped, "Buscando servidor…".to_owned());
+
+        // Sampling runs in its own task so CPU/RAM are visible even while a
+        // large model is still loading and `refresh` is blocked.
+        {
+            let events = self.events.clone();
+            tokio::spawn(async move {
+                let mut sampler = SystemSampler::new();
+                let mut ticker = tokio::time::interval(Duration::from_secs(2));
+                loop {
+                    ticker.tick().await;
+                    let usage = sampler.sample();
+                    let event = EngineEvent::SystemUsage {
+                        cpu_percent: usage.cpu_percent,
+                        ram_total_mb: usage.ram_total_mb,
+                        ram_used_mb: usage.ram_used_mb,
+                        app_mb: usage.app_mb,
+                    };
+                    if events.send(event).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
 
         // Always probe first: a server started by the user must be detected
         // even when no GGUF model is configured in LocalForge.

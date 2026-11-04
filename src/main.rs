@@ -32,7 +32,7 @@ fn main() {
 
     let engine = controller::spawn(config.clone());
 
-    application().with_assets(assets::Assets).run(move |cx| {
+    application().with_assets(assets::AllAssets).run(move |cx| {
         init(cx);
         config::init(cx, config.clone(), config_path.clone());
         ui::theme::apply(cx, &config.ui, None);

@@ -57,6 +57,30 @@ pub fn page() -> SettingPage {
                 )
                 .item(
                     SettingItem::new(
+                        "Comando",
+                        text_field(
+                            |cfg| cfg.scene3d.command.clone(),
+                            |cfg, value| cfg.scene3d.command = value,
+                        ),
+                    )
+                    .description("Alternativa CLI al endpoint HTTP.")
+                    .disabled(true),
+                )
+                .item(
+                    SettingItem::new(
+                        "Argumentos extra",
+                        text_field(
+                            |cfg| cfg.scene3d.extra_args.join(" "),
+                            |cfg, value| {
+                                cfg.scene3d.extra_args =
+                                    value.split_whitespace().map(str::to_owned).collect();
+                            },
+                        ),
+                    )
+                    .disabled(true),
+                )
+                .item(
+                    SettingItem::new(
                         "Carpeta de modelos",
                         path_field(
                             |cfg| cfg.scene3d.model_dir.clone(),

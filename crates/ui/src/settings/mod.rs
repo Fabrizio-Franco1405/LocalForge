@@ -28,12 +28,12 @@ pub fn view(cx: &App, page: Page) -> impl IntoElement {
         _ => ("localforge-settings-general", vec![general::page()]),
     };
 
-    div().id("settings-page").size_full().child(
-        div().flex().flex_col().size_full().p_5().child(
-            div()
-                .w_full()
-                .max_w(px(960.))
-                .child(Settings::new(id).pages(pages)),
+    div().id("settings-page").size_full().p_5().child(
+        div().h_full().w_full().max_w(px(960.)).child(
+            Settings::new(id)
+                .sidebar_width(px(1.))
+                .sidebar_size_range(px(1.)..px(1.))
+                .pages(pages),
         ),
     )
 }

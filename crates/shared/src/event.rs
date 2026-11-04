@@ -135,6 +135,20 @@ pub enum EngineEvent {
         /// Límite máximo configurado (-c).
         total: u32,
     },
+    /// Host and application resource usage sampled by the controller.
+    ///
+    /// Values are `None` when the platform has no sampler yet, so the UI can
+    /// show "n/d" instead of a fake zero.
+    SystemUsage {
+        /// Host CPU usage in percent (`0..=100`).
+        cpu_percent: Option<f32>,
+        /// Total RAM in MiB.
+        ram_total_mb: Option<u64>,
+        /// Used RAM in MiB.
+        ram_used_mb: Option<u64>,
+        /// Resident memory of this application in MiB.
+        app_mb: Option<u64>,
+    },
     /// A recoverable error. The operation that produced it is finished.
     Error {
         /// Component that failed (`llm`, `stt`, `tts`, `audio`).

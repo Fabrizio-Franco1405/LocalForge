@@ -4,8 +4,9 @@
 //! four sections are the isolated configuration areas (LLM, audio, 3D,
 //! general); diagnostics is a utility, not a section.
 
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _};
+use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, StyledExt as _};
 use gpui_kit::prelude::{FluentBuilder as _, StatefulInteractiveElement as _};
 use gpui_kit::*;
 use shared::text::truncate_chars;
@@ -93,7 +94,7 @@ impl VoxApp {
                             .text_color(theme.primary_foreground)
                             .text_xs()
                             .font_semibold()
-                            .child("LF"),
+                            .child(Icon::new(IconName::Sparkles).small()),
                     )
                     .child(
                         div()
@@ -115,6 +116,12 @@ impl VoxApp {
         let theme = cx.theme();
         let active = self.page == page;
         let id = page.id();
+        let accent = match page {
+            Page::Audio => theme.success,
+            Page::Scene3d => theme.warning,
+            Page::Llm => theme.primary,
+            _ => theme.muted_foreground,
+        };
 
         div()
             .id(format!("nav-{id}"))
@@ -125,20 +132,16 @@ impl VoxApp {
             .py_2()
             .rounded_md()
             .cursor_pointer()
-            .when(active, |this| this.bg(theme.primary.opacity(0.14)))
-            .text_color(if active {
-                theme.primary
-            } else {
-                theme.foreground
-            })
+            .when(active, |this| this.bg(accent.opacity(0.14)))
+            .text_color(if active { accent } else { theme.foreground })
             .on_click(cx.listener(move |this, _, _, cx| {
                 if this.page != page {
                     this.page = page;
                     cx.notify();
                 }
             }))
-            .child(div().w(px(6.)).h(px(6.)).rounded_full().bg(if active {
-                theme.primary
+            .child(Icon::new(section_icon(page)).small().text_color(if active {
+                accent
             } else {
                 theme.muted_foreground
             }))
@@ -197,6 +200,40 @@ impl VoxApp {
             .child(
                 div()
                     .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(resource_line(
+                        IconName::Cpu,
+                        match self.cpu {
+                            Some(value) => format!("CPU {value:.0}%"),
+                            None => "CPU —".to_owned(),
+                        },
+                        cx,
+                    ))
+                    .child(resource_line(
+                        IconName::MemoryStick,
+                        match (self.ram_used_mb, self.ram_total_mb) {
+                            (Some(used), Some(total)) => format!(
+                                "RAM {:.1}/{:.1} GB",
+                                used as f32 / 1024.0,
+                                total as f32 / 1024.0
+                            ),
+                            _ => "RAM —".to_owned(),
+                        },
+                        cx,
+                    ))
+                    .child(resource_line(
+                        IconName::Gauge,
+                        match self.app_mb {
+                            Some(value) => format!("App {value} MB"),
+                            None => "App —".to_owned(),
+                        },
+                        cx,
+                    )),
+            )
+            .child(
+                div()
+                    .flex()
                     .items_center()
                     .justify_between()
                     .gap_2()
@@ -225,4 +262,25 @@ impl VoxApp {
                     ),
             )
     }
+}
+
+fn section_icon(page: Page) -> IconName {
+    match page {
+        Page::Chat => IconName::MessageSquare,
+        Page::Llm => IconName::Bot,
+        Page::Audio => IconName::Mic,
+        Page::Scene3d => IconName::Cuboid,
+        Page::General => IconName::Settings,
+        Page::Tools => IconName::Activity,
+    }
+}
+
+fn resource_line(icon: IconName, text: String, cx: &App) -> impl IntoElement {
+    let theme = cx.theme();
+    div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(Icon::new(icon).small().text_color(theme.muted_foreground))
+        .child(div().text_xs().text_color(theme.foreground).child(text))
 }

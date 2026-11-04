@@ -31,12 +31,24 @@ es la vista de inicio (se abre desde la marca o el botón «Conversación»).
 | **Motor LLM** | Local (`llama-server` + GGUF + `-ngl` + host/puerto) o Externo (endpoint, model id, API key). Cada modo muestra solo sus campos |
 | **Motor Audio** | Whisper/STT, Kokoro/TTS, micrófono, VAD y playback |
 | **Motor 3D** | Reservado; visible como «próximamente», sin backend todavía |
-| **General** | Interfaz, rutas y acceso al diagnóstico |
+| **Ajustes** | Cambios visuales (tema, color de acento, radio, tipografía), rutas y diagnóstico |
 
 El cambio Local ⇄ Externo reconstruye la página al instante: en Local no verás
 endpoints y en Externo no verás rutas de `llama-server`. «Probar conexión»
 aplica el borrador y sondea el servidor, así puedes pegar `host:puerto` y
-detectarlo sin reiniciar la app.
+detectarlo sin reiniciar la app. En Local la cabecera ofrece **Encender**,
+**Apagar** y **Reiniciar**; el botón de aplicar solo aparece cuando hay cambios.
+
+El pie del sidebar muestra **CPU, RAM del sistema y memoria de la app** cada dos
+segundos. El muestreo vive en `crates/controller`, no en la UI.
+
+## Core agnóstico a la UI
+
+`shared`, `llm_engine`, `controller`, `stt`, `tts`, `audio_engine` y `scene3d`
+no dependen de GPUI. La UI solo envía `EngineCommand` y pinta `EngineEvent` a
+través de `EngineHandle`. Cambiar a JS/TS, Python o una web implica implementar
+ese protocolo (o un adaptador IPC sobre el handle), no reescribir los motores.
+La suite de pruebas verifica esa frontera.
 
 ## Estado
 
@@ -45,7 +57,9 @@ detectarlo sin reiniciar la app.
 - [x] Gestión de `llama-server` con health-check, SSE y `-ngl` (`llm_engine`)
 - [x] Modo externo: detecta un servidor OpenAI local y usa el modelo de `/v1/models`
 - [x] Controlador como crate independiente (`crates/controller`)
-- [x] UI por secciones: sidebar LLM/Audio/3D/General, chat, diagnóstico y ajustes
+- [x] UI por secciones con iconos: sidebar LLM/Audio/3D/Ajustes, chat, diagnóstico y temas
+- [x] Monitor de CPU/RAM de la app y del host en tiempo real (muestreado en el core)
+- [x] Encender / apagar / reiniciar el motor local desde la cabecera
 - [ ] STT con `whisper-cli` (`stt`) — stub documentado, hito M2
 - [ ] TTS Kokoro ONNX (`tts`) — stub documentado, hito M3
 - [ ] Captura, VAD y playback (`audio_engine`) — stub documentado, hitos M2/M4
@@ -146,7 +160,7 @@ La suite vive en `test/`, es un crate propio **fuera del workspace** y está
 ignorada por git: el repositorio solo versiona el código de la app.
 
 ```bash
-cd test && cargo test        # 44 tests: shared, llm_engine, ui, controller
+cd test && cargo test        # 51 tests: shared, llm_engine, system, ui, controller, boundary
 ```
 
 No necesita GPU, micrófono ni modelos. El detalle (cobertura, fixtures y

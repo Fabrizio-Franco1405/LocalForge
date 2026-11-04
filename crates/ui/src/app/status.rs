@@ -1,6 +1,7 @@
 //! Bottom status bar.
 
-use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::assets::IconName;
+use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use shared::{LlmMode, TtsBackend};
@@ -54,9 +55,65 @@ impl VoxApp {
             )
             .child(
                 div()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(format!("LocalForge v{}", env!("CARGO_PKG_VERSION"))),
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .child(
+                                Icon::new(IconName::Cpu)
+                                    .small()
+                                    .text_color(theme.muted_foreground),
+                            )
+                            .child(div().text_xs().text_color(theme.muted_foreground).child(
+                                match self.cpu {
+                                    Some(value) => format!("{value:.0}%"),
+                                    None => "—".to_owned(),
+                                },
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .child(
+                                Icon::new(IconName::MemoryStick)
+                                    .small()
+                                    .text_color(theme.muted_foreground),
+                            )
+                            .child(div().text_xs().text_color(theme.muted_foreground).child(
+                                match (self.ram_used_mb, self.ram_total_mb) {
+                                    (Some(used), Some(total)) => {
+                                        format!(
+                                            "{:.1}/{:.1} GB",
+                                            used as f32 / 1024.0,
+                                            total as f32 / 1024.0
+                                        )
+                                    }
+                                    _ => "—".to_owned(),
+                                },
+                            )),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(format!(
+                                "app {} MB",
+                                self.app_mb
+                                    .map_or_else(|| "—".to_owned(), |v| v.to_string())
+                            )),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(format!("LocalForge v{}", env!("CARGO_PKG_VERSION"))),
+                    ),
             )
     }
 }

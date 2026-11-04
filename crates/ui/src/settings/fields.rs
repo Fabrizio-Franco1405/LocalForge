@@ -190,9 +190,11 @@ where
     G: Fn(&VoxConfig) -> String + 'static,
     S: Fn(&mut VoxConfig, String) + 'static,
 {
+    // The component stores `(value, label)`: the value is what gets persisted
+    // and compared, the label is what the user sees.
     let options = options
         .iter()
-        .map(|(label, value)| (SharedString::from(*label), SharedString::from(*value)))
+        .map(|(label, value)| (SharedString::from(*value), SharedString::from(*label)))
         .collect();
 
     SettingField::dropdown(
