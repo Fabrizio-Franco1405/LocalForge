@@ -128,7 +128,7 @@
     </g>
 
     <text x="53" y="270" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace" font-size="10.5" fill="#6f6b8a">pre-roll 250–400 ms · cierre por silencio 500–800 ms</text>
-    <text x="1147" y="270" text-anchor="end" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace" font-size="10.5" fill="#6f6b8a">8 GB de VRAM compartidos · el TTS vive en CPU</text>
+    <text x="1147" y="270" text-anchor="end" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace" font-size="10.5" fill="#6f6b8a">VRAM compartida · el TTS vive en CPU</text>
   </g>
 
   <rect x="0.75" y="0.75" width="1198.5" height="308.5" rx="23.25" fill="none" stroke="#2a2748" stroke-width="1.5"/>

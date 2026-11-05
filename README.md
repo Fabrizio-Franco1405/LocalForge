@@ -23,22 +23,11 @@
 
 Montar IA local no debería significar pelearse con CUDA, instalar media docena de paquetes de Python ni enviar tus conversaciones a un servidor ajeno.
 
-Y si tu GPU es una **AMD RX 5700 XT (RDNA 1)**, el problema es mayor: CUDA no existe para ti y ROCm nunca fue estable en `gfx1010`. La única ruta GPU que funciona sin parches de driver es **Vulkan**.
+Y si tu GPU queda fuera del ecosistema CUDA, el problema es mayor: No hay una ruta oficial y las alternativas exigen drivers, parches o versiones concretas. La ruta más universal es **Vulkan**.
 
-**LocalForge nació de esa frustración.** No es otro wrapper de chat: es un **orquestador de escritorio** que conecta tus propios binarios de inferencia, gestiona sus procesos y te deja configurarlo todo desde una interfaz nativa. Tú pones las rutas y los modelos; la app se encarga del resto.
+**LocalForge nació de esa frustración.** No es otro wrapper de chat: Es un **orquestador de escritorio** que conecta tus propios binarios de inferencia, gestiona sus procesos y te deja configurarlo todo desde una interfaz nativa. Tú pones las rutas y los modelos; la app se encarga del resto.
 
-> **Regla de oro:** si una dependencia exige CUDA, ROCm o PyTorch, se descarta. **Vulkan o CPU.**
-
-### Hardware objetivo
-
-| Componente | Objetivo |
-| --- | --- |
-| GPU | AMD RX 5700 XT · RDNA 1 (`gfx1010`) · 8 GB |
-| CPU | AMD Ryzen 7 5700G · 8C/16T · sin NPU |
-| RAM | 32 GB DDR4 |
-| Backend | **Vulkan** (Mesa RADV en Linux) |
-
-No es una lista cerrada: cualquier GPU con Vulkan funciona (AMD, NVIDIA, Intel), y en macOS se usa MoltenVK. El objetivo es que el hardware de gama media de 2019 siga siendo útil para IA local.
+> **Regla de oro:** Si una dependencia exige CUDA, ROCm o PyTorch, se descarta. **Vulkan o CPU.**
 
 ---
 
@@ -58,9 +47,9 @@ No es una lista cerrada: cualquier GPU con Vulkan funciona (AMD, NVIDIA, Intel),
 | Modo | Qué hace |
 | --- | --- |
 | **Local** | Lanza `llama-server` con tu GGUF, aplica `-ngl`, espera el health-check y consume el streaming SSE. Encender, apagar y reiniciar desde la cabecera. |
-| **Externo** | No lanza ningún proceso: sondea `/v1/models` y usa el modelo reportado. Compatible con Ollama, LM Studio o un `llama-server` ya iniciado. |
+| **Externo** | No lanza ningún proceso: Sondea `/v1/models` y usa el modelo reportado. Compatible con Ollama, LM Studio o un `llama-server` ya iniciado. |
 
-Cada modo muestra únicamente sus campos: en **Local** no verás endpoints y en **Externo** no verás rutas de binarios.
+Cada modo muestra únicamente sus campos: En **Local** no verás endpoints y en **Externo** no verás rutas de binarios.
 
 ---
 
@@ -72,10 +61,10 @@ Cada modo muestra únicamente sus campos: en **Local** no verás endpoints y en 
 
 <br />
 
-- **`audio_engine`** captura con `cpal`, hace downmix y remuestreo a 16 kHz mono, aplica VAD WebRTC y detecta el final del turno con pre-roll y silencio configurable.
-- **`stt`** invoca `whisper-cli` con un WAV PCM16 mono a 16 kHz, timeout y un parser tolerante que descarta `[BLANK_AUDIO]` y similares.
-- **`llm_engine`** habla con `llama-server` o con un servidor OpenAI externo y streamea los tokens por SSE.
-- **`tts`** limpia el Markdown y los emojis con `shared::text::for_speech`, sintetiza con Kokoro ONNX y reproduce el WAV resultante.
+- **`audio_engine`:** Captura con `cpal`, hace downmix y remuestreo a 16 kHz mono, aplica VAD WebRTC y detecta el final del turno con pre-roll y silencio configurable.
+- **`stt`:** Invoca `whisper-cli` con un WAV PCM16 mono a 16 kHz, timeout y un parser tolerante que descarta `[BLANK_AUDIO]` y similares.
+- **`llm_engine`:** Habla con `llama-server` o con un servidor OpenAI externo y streamea los tokens por SSE.
+- **`tts`:** Limpia el Markdown y los emojis con `shared::text::for_speech`, sintetiza con Kokoro ONNX y reproduce el WAV resultante.
 
 > La conversación por texto ya funciona de punta a punta. La captura, el VAD, el STT y el TTS están implementados; el bucle **manos libres** completo —barge-in y TTS solapado por frases— sigue en el roadmap. Lo que no está, no se simula: `scene3d` compila como stub honesto.
 
@@ -83,7 +72,7 @@ Cada modo muestra únicamente sus campos: en **Local** no verás endpoints y en 
 
 ## 🧱 Arquitectura
 
-Un workspace de **8 crates** con una frontera estricta: el core no conoce GPUI.
+Un workspace de **8 crates** con una frontera estricta: El core no conoce GPUI.
 
 ```mermaid
 flowchart TB
@@ -120,7 +109,7 @@ flowchart TB
 | `ui` | Vistas GPUI componentizadas y Ajustes por motor | ✅ |
 | `scene3d` | Motor 3D futuro, con su contrato documentado | 💤 stub |
 
-La UI nunca arranca un motor: solo envía comandos y pinta eventos.
+La UI nunca arranca un motor: Solo envía comandos y pinta eventos.
 
 ```text
 UI (GPUI) ──EngineCommand──► controller ──► llama.cpp · whisper.cpp · Kokoro · cpal
@@ -144,7 +133,7 @@ El controlador vive en su propio hilo con un runtime `tokio`; la UI sondea los e
 | Configuración | `figment` + TOML | — |
 | Concurrencia | `tokio` + canales `crossbeam` | — |
 
-El TTS corre a propósito en CPU: con 8 GB de VRAM, Kokoro no debe competir con el LLM ni con Whisper.
+El TTS corre a propósito en CPU: Así Kokoro no compite por la VRAM con el LLM ni con Whisper.
 
 ---
 
@@ -154,7 +143,7 @@ El TTS corre a propósito en CPU: con 8 GB de VRAM, Kokoro no debe competir con 
 
 - ✅ Workspace modular de 8 crates y binario GPUI mínimo.
 - ✅ Configuración segmentada y persistente (`config.toml`, `LOCALFORGE_*`, migración desde VoxLocal).
-- ✅ Gestión de `llama-server`: encender, apagar, reiniciar, health-check y streaming.
+- ✅ Gestión de `llama-server`: Encender, apagar, reiniciar, health-check y streaming.
 - ✅ Modo externo para Ollama, LM Studio o un servidor ya arrancado.
 - ✅ Biblioteca de GGUF con alias y detección de shards.
 - ✅ STT con `whisper-cli`, TTS con Kokoro y audio con captura/VAD/playback.
@@ -211,7 +200,7 @@ Verifica que `llama.cpp` enumera el dispositivo:
 
 ```bash
 llama-server --list-devices
-# Vulkan0: AMD Radeon RX 5700 XT (RADV NAVI10) (8176 MiB, ...)
+# Vulkan0: <nombre de tu GPU> (<driver>) (<memoria>, ...)
 ```
 
 ### 3. Descarga los modelos
@@ -219,11 +208,11 @@ llama-server --list-devices
 ```bash
 mkdir -p assets/models/{llm,whisper,kokoro}
 
-# LLM: Qwen3-4B en Q4_K_M es el punto dulce para 8 GB de VRAM
+# LLM: Qwen3-4B en Q4_K_M es un buen equilibrio para empezar
 huggingface-cli download Qwen/Qwen3-4B-Instruct-2507-GGUF \
   --include '*Q4_K_M.gguf' --local-dir assets/models/llm
 
-# STT: whisper small para español
+# STT: whisper small para Español
 curl -L -o assets/models/whisper/ggml-small.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
 ```
@@ -275,12 +264,12 @@ Los datos y logs viven en `dirs::data_dir()/localforge/`. Las claves nuevas tien
 
 ---
 
-## 🚀 Rendimiento en 8 GB de VRAM
+## 🚀 Rendimiento y VRAM
 
-- **4B Q4_K_M + contexto 4k–8k** es el punto dulce. Un **8B Q4_K_M** pide bajar a contexto 2k o usar Q3/IQ3.
-- `-ngl 99` intenta todo; si el driver no cabe, prueba `-ngl 24–32` en un 8B.
-- Whisper compite por VRAM cuando transcribe: usa `ggml-small` como máximo.
-- La VRAM no es RAM. Un 8B con contexto 32k puede hacer swap y arrastrar todo el sistema.
+- Un modelo pequeño o mediano en Q4_K_M suele ser el mejor equilibrio entre calidad, velocidad y memoria. Si no cabe, baja el contexto o usa una cuantización menor.
+- `-ngl 99` intenta meter todas las capas en la GPU; si el driver no puede, reduce el número de capas hasta que el modelo quepa.
+- Whisper compite por VRAM mientras transcribe: elige el modelo STT más pequeño que mantenga buena calidad en tu idioma.
+- La VRAM no es RAM infinita: un modelo grande con un contexto enorme puede hacer swap y arrastrar todo el sistema.
 - Compila siempre en `--release`: el perfil incluye `lto = "thin"`, `codegen-units = 1` y `strip`.
 
 ---
@@ -304,7 +293,7 @@ También hay pruebas de humo para el pipeline de audio (`test/src/bin/tone.rs` y
 | Documento | Contenido |
 | --- | --- |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Crates, flujo de datos, hilos, contratos y ADRs |
-| [docs/HARDWARE-VULKAN.md](docs/HARDWARE-VULKAN.md) | RDNA 1, presupuesto de VRAM, builds y diagnóstico |
+| [docs/HARDWARE-VULKAN.md](docs/HARDWARE-VULKAN.md) | Requisitos Vulkan, presupuesto de VRAM, builds y diagnóstico |
 | [docs/MODELS.md](docs/MODELS.md) | Modelos recomendados y descargas verificadas |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Hitos y criterios de aceptación |
 | [AGENTS.md](AGENTS.md) | Contexto y reglas para agentes que trabajen en el repo |
