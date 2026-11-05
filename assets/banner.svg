@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 380" width="1200" height="380" role="img" aria-label="LocalForge — harness local de IA con Vulkan y Rust">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#09090f"/>
+      <stop offset="0.55" stop-color="#0c0b16"/>
+      <stop offset="1" stop-color="#120d22"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8b6cff"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b9a6ff"/>
+      <stop offset="1" stop-color="#6446ff"/>
+    </linearGradient>
+    <radialGradient id="glowA" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#7c5cff" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#7c5cff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#ffffff" stroke-opacity="0.04" stroke-width="1"/>
+    </pattern>
+    <clipPath id="frame">
+      <rect width="1200" height="380" rx="28"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <rect width="1200" height="380" fill="url(#bg)"/>
+    <rect width="1200" height="380" fill="url(#grid)"/>
+    <circle cx="1020" cy="150" r="300" fill="url(#glowA)"/>
+    <circle cx="120" cy="380" r="250" fill="url(#glowB)"/>
+    <circle cx="700" cy="20" r="180" fill="url(#glowB)"/>
+
+    <!-- left copy -->
+    <text x="72" y="104" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace" font-size="13" letter-spacing="4.5" fill="#9b8cff">LOCAL-FIRST AI HARNESS</text>
+
+    <text x="70" y="192" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="74" font-weight="700" letter-spacing="-2.5" fill="#f6f5ff">Local<tspan fill="url(#brand)">Forge</tspan></text>
+
+    <text x="72" y="238" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="21" fill="#b6b3cf">Tu harness de IA local. Sin nube. Sin CUDA. Sin PyTorch.</text>
+    <text x="72" y="266" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" fill="#7d7999">Orquesta LLM, voz y 3D sobre los binarios y modelos que tú eliges.</text>
+
+    <!-- chips -->
+    <g font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace" font-size="12.5" letter-spacing="0.3">
+      <rect x="72" y="304" width="132" height="34" rx="17" fill="#17142b" stroke="#3a2f6e"/>
+      <text x="138" y="326" text-anchor="middle" fill="#c9c2ff">Vulkan · GPU</text>
+
+      <rect x="214" y="304" width="108" height="34" rx="17" fill="#17142b" stroke="#3a2f6e"/>
+      <text x="268" y="326" text-anchor="middle" fill="#c9c2ff">llama.cpp</text>
+
+      <rect x="332" y="304" width="122" height="34" rx="17" fill="#17142b" stroke="#3a2f6e"/>
+      <text x="393" y="326" text-anchor="middle" fill="#c9c2ff">whisper.cpp</text>
+
+      <rect x="464" y="304" width="130" height="34" rx="17" fill="#17142b" stroke="#3a2f6e"/>
+      <text x="529" y="326" text-anchor="middle" fill="#c9c2ff">Kokoro ONNX</text>
+
+      <rect x="604" y="304" width="106" height="34" rx="17" fill="#17142b" stroke="#3a2f6e"/>
+      <text x="657" y="326" text-anchor="middle" fill="#c9c2ff">Rust 2024</text>
+    </g>
+
+    <!-- emblem -->
+    <g transform="translate(1000 190)">
+      <circle r="176" fill="none" stroke="#22d3ee" stroke-opacity="0.10" stroke-dasharray="2 10"/>
+      <circle r="146" fill="none" stroke="#7c5cff" stroke-opacity="0.16"/>
+
+      <path d="M0 -122 L105.6 -61 L105.6 61 L0 122 L-105.6 61 L-105.6 -61 Z" fill="#7c5cff" fill-opacity="0.045" stroke="url(#brand)" stroke-width="3"/>
+
+      <path d="M0 -96 L83.1 -48 L83.1 48 L0 96 L-83.1 48 L-83.1 -48 Z" fill="none" stroke="#a78bfa" stroke-opacity="0.22" stroke-dasharray="4 9"/>
+
+      <!-- anvil -->
+      <g fill="url(#metal)" fill-opacity="0.92" stroke="#cfc3ff" stroke-opacity="0.55" stroke-width="1.5" stroke-linejoin="round">
+        <path d="M-58 -38 H38 L66 -27 L38 -17 H-58 Z"/>
+        <path d="M-16 -17 H16 V20 H-16 Z"/>
+        <path d="M-32 20 H32 V36 H-32 Z"/>
+      </g>
+
+      <!-- circuit traces -->
+      <g stroke="#22d3ee" stroke-opacity="0.5" stroke-width="1.6" fill="none">
+        <path d="M-105.6 -61 H-130 V-20 H-151"/>
+        <path d="M105.6 61 H130 V20 H151"/>
+        <path d="M0 -122 V-146"/>
+      </g>
+      <g fill="#22d3ee">
+        <circle cx="-151" cy="-20" r="3.5"/>
+        <circle cx="151" cy="20" r="3.5"/>
+        <circle cx="0" cy="-146" r="3.5"/>
+      </g>
+
+      <!-- sparks -->
+      <circle cx="-76" cy="-78" r="2.6" fill="#fbbf24" fill-opacity="0.9"/>
+      <circle cx="82" cy="-44" r="2" fill="#a78bfa" fill-opacity="0.9"/>
+      <circle cx="70" cy="82" r="2.4" fill="#22d3ee" fill-opacity="0.8"/>
+      <circle cx="-88" cy="58" r="1.8" fill="#7c5cff" fill-opacity="0.9"/>
+    </g>
+  </g>
+
+  <rect x="0.75" y="0.75" width="1198.5" height="378.5" rx="27.5" fill="none" stroke="#2b2650" stroke-width="1.5"/>
+</svg>

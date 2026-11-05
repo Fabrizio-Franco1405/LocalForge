@@ -1,76 +1,180 @@
-# LocalForge
+<div align="center">
+  <img src="assets/banner.svg" alt="LocalForge — harness local de IA con Vulkan y Rust" width="100%" />
+  <br /><br />
+  
+  [![Rust 2024](https://img.shields.io/badge/Rust-2024-000000?style=flat-square&logo=rust&logoColor=white)](docs/ARCHITECTURE.md)
+  [![Vulkan](https://img.shields.io/badge/GPU-Vulkan-7C5CFF?style=flat-square&logo=vulkan&logoColor=white)](docs/HARDWARE-VULKAN.md)
+  [![GPUI Kit](https://img.shields.io/badge/UI-GPUI%20Kit-A78BFA?style=flat-square)](docs/ARCHITECTURE.md)
+  ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20%7C%20macOS-22D3EE?style=flat-square)
+  ![Estado alpha](https://img.shields.io/badge/status-alpha-FBBF24?style=flat-square)
+  ![License](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-3DDC84?style=flat-square)
+</div>
 
-Harness local de IA para tu máquina. Conecta tus propios motores —LLM, voz y,
-próximamente, 3D— sin nube, sin PyTorch y sin CUDA. Tú pones los binarios y los
-modelos; LocalForge orquesta procesos, health-checks y configuración.
+<br />
 
-```
-Micrófono ──► VAD ──► whisper.cpp (Vulkan) ──► llama.cpp (Vulkan) ──► Kokoro ONNX (CPU) ──► Altavoces
-              │                │                        │                     │
-              └── audio_engine └── stt                  └── llm_engine        └── tts
-```
+<div align="center">
+  <img src="assets/inicio.png" alt="Interfaz de LocalForge: chat, sidebar de motores y estado del sistema" width="94%" />
+  <p><sub>Interfaz nativa: chat, estado de los motores y recursos del equipo en tiempo real.</sub></p>
+</div>
 
-## Hardware objetivo
+---
 
-| Componente | Objetivo | Notas |
-| --- | --- | --- |
-| GPU | AMD RX 5700 XT (RDNA 1, gfx1010, 8 GB) | Vulkan vía Mesa RADV; también NVIDIA/Intel con Vulkan |
-| CPU | AMD Ryzen 7 5700G (8C/16T, sin NPU) | AVX2; suficiente para VAD, TTS ONNX y orquestación |
-| RAM | 32 GB DDR4 | Presupuesto típico: 12–16 GB para el LLM |
-| Backend | **Vulkan** | Único backend soportado de forma nativa en RDNA 1 |
+## 🌩️ El problema
 
-> **Regla de oro:** si una dependencia exige CUDA, ROCm o PyTorch, se descarta. Vulkan o CPU.
+Montar IA local no debería significar pelearse con CUDA, instalar media docena de paquetes de Python ni enviar tus conversaciones a un servidor ajeno.
 
-## Secciones
+Y si tu GPU es una **AMD RX 5700 XT (RDNA 1)**, el problema es mayor: CUDA no existe para ti y ROCm nunca fue estable en `gfx1010`. La única ruta GPU que funciona sin parches de driver es **Vulkan**.
 
-El sidebar agrupa la configuración por motor, aislada entre sí. La conversación
-es la vista de inicio (se abre desde la marca o el botón «Conversación»).
+**LocalForge nació de esa frustración.** No es otro wrapper de chat: es un **orquestador de escritorio** que conecta tus propios binarios de inferencia, gestiona sus procesos y te deja configurarlo todo desde una interfaz nativa. Tú pones las rutas y los modelos; la app se encarga del resto.
 
-| Sección | Contenido |
+> **Regla de oro:** si una dependencia exige CUDA, ROCm o PyTorch, se descarta. **Vulkan o CPU.**
+
+### Hardware objetivo
+
+| Componente | Objetivo |
 | --- | --- |
-| **Motor LLM** | Local (`llama-server` + GGUF + `-ngl` + host/puerto) o Externo (endpoint, model id, API key). Cada modo muestra solo sus campos |
-| **Motor Audio** | Whisper/STT, Kokoro/TTS, micrófono, VAD y playback |
-| **Motor 3D** | Reservado; visible como «próximamente», sin backend todavía |
-| **Ajustes** | Cambios visuales (tema, color de acento, radio, tipografía), rutas y diagnóstico |
+| GPU | AMD RX 5700 XT · RDNA 1 (`gfx1010`) · 8 GB |
+| CPU | AMD Ryzen 7 5700G · 8C/16T · sin NPU |
+| RAM | 32 GB DDR4 |
+| Backend | **Vulkan** (Mesa RADV en Linux) |
 
-El cambio Local ⇄ Externo reconstruye la página al instante: en Local no verás
-endpoints y en Externo no verás rutas de `llama-server`. «Probar conexión»
-aplica el borrador y sondea el servidor, así puedes pegar `host:puerto` y
-detectarlo sin reiniciar la app. En Local la cabecera ofrece **Encender**,
-**Apagar** y **Reiniciar**; el botón de aplicar solo aparece cuando hay cambios.
+No es una lista cerrada: cualquier GPU con Vulkan funciona (AMD, NVIDIA, Intel), y en macOS se usa MoltenVK. El objetivo es que el hardware de gama media de 2019 siga siendo útil para IA local.
 
-El pie del sidebar muestra **CPU, RAM del sistema y memoria de la app** cada dos
-segundos. El muestreo vive en `crates/controller`, no en la UI.
+---
 
-## Core agnóstico a la UI
+## ✨ Lo que hace
 
-`shared`, `llm_engine`, `controller`, `stt`, `tts`, `audio_engine` y `scene3d`
-no dependen de GPUI. La UI solo envía `EngineCommand` y pinta `EngineEvent` a
-través de `EngineHandle`. Cambiar a JS/TS, Python o una web implica implementar
-ese protocolo (o un adaptador IPC sobre el handle), no reescribir los motores.
-La suite de pruebas verifica esa frontera.
+| Capacidad | Detalle |
+| --- | --- |
+| 🎮 **Vulkan first** | LLM y STT corren sobre `llama.cpp` y `whisper.cpp` compilados con Vulkan. Funciona en AMD, NVIDIA e Intel, sin tocar drivers ni instalar ROCm. |
+| 🧩 **Core agnóstico a la UI** | Los motores son crates Rust testeables sin ventana. La UI solo intercambia `EngineCommand` y `EngineEvent`, así que puedes reemplazarla sin reescribir el core. |
+| 🎛️ **Todo configurable** | Binarios, GGUF, capas GPU (`-ngl`), contexto, hilos, voces, VAD, tema… sin recompilar. |
+| 🔒 **Privado por diseño** | Todo escucha en `127.0.0.1`. Prompts, audio y modelos no salen de tu equipo. Cero telemetría. |
+| 🪶 **No bloquea la interfaz** | Escaneos, muestreo de recursos y audio viven fuera del hilo de GPUI. |
+| 🔁 **Fallo recuperable** | Logs de los procesos hijos en un ring buffer, reinicio desde la cabecera y limpieza de procesos al cerrar. |
 
-## Estado
+### Dos formas de conectar el LLM
 
-- [x] Workspace modular: `shared`, `llm_engine`, `controller`, `ui` (+ stubs por motor)
-- [x] Configuración segmentada y persistente (`shared`: TOML, `LOCALFORGE_*`, tools)
-- [x] Gestión de `llama-server` con health-check, SSE y `-ngl` (`llm_engine`)
-- [x] Modo externo: detecta un servidor OpenAI local y usa el modelo de `/v1/models`
-- [x] Controlador como crate independiente (`crates/controller`)
-- [x] UI por secciones con iconos: sidebar LLM/Audio/3D/Ajustes, chat, diagnóstico y temas
-- [x] Monitor de CPU/RAM de la app y del host en tiempo real (muestreado en el core)
-- [x] Encender / apagar / reiniciar el motor local desde la cabecera
-- [x] STT con `whisper-cli` (`stt`): WAV 16 kHz, timeout, parser tolerante
-- [x] TTS Kokoro ONNX (`tts`): worker `tools/kokoro_worker.py`, comando externo y WAV 24 kHz
-- [x] Captura cpal, VAD WebRTC, endpointing y playback (`audio_engine`)
-- [ ] Motor 3D (`scene3d`) — stub, sin fecha
-- [ ] Conversación manos libres completa (barge-in, streaming TTS)
-- [ ] Empaquetado e instaladores
+| Modo | Qué hace |
+| --- | --- |
+| **Local** | Lanza `llama-server` con tu GGUF, aplica `-ngl`, espera el health-check y consume el streaming SSE. Encender, apagar y reiniciar desde la cabecera. |
+| **Externo** | No lanza ningún proceso: sondea `/v1/models` y usa el modelo reportado. Compatible con Ollama, LM Studio o un `llama-server` ya iniciado. |
 
-Los crates sin implementar compilan como placeholders con su contrato en el
-docstring; no fingen funcionalidad. Consulta [docs/ROADMAP.md](docs/ROADMAP.md).
+Cada modo muestra únicamente sus campos: en **Local** no verás endpoints y en **Externo** no verás rutas de binarios.
 
-## Inicio rápido
+---
+
+## 🎙️ El pipeline de voz
+
+<div align="center">
+  <img src="assets/pipeline.svg" alt="Pipeline: micrófono → VAD → whisper.cpp → llama.cpp → Kokoro ONNX → altavoces" width="100%" />
+</div>
+
+<br />
+
+- **`audio_engine`** captura con `cpal`, hace downmix y remuestreo a 16 kHz mono, aplica VAD WebRTC y detecta el final del turno con pre-roll y silencio configurable.
+- **`stt`** invoca `whisper-cli` con un WAV PCM16 mono a 16 kHz, timeout y un parser tolerante que descarta `[BLANK_AUDIO]` y similares.
+- **`llm_engine`** habla con `llama-server` o con un servidor OpenAI externo y streamea los tokens por SSE.
+- **`tts`** limpia el Markdown y los emojis con `shared::text::for_speech`, sintetiza con Kokoro ONNX y reproduce el WAV resultante.
+
+> La conversación por texto ya funciona de punta a punta. La captura, el VAD, el STT y el TTS están implementados; el bucle **manos libres** completo —barge-in y TTS solapado por frases— sigue en el roadmap. Lo que no está, no se simula: `scene3d` compila como stub honesto.
+
+---
+
+## 🧱 Arquitectura
+
+Un workspace de **8 crates** con una frontera estricta: el core no conoce GPUI.
+
+```mermaid
+flowchart TB
+    main["localforge<br/>binario GPUI"]
+    ui["crates/ui<br/>Chat · Llamada · Estudio 3D · Ajustes"]
+    controller["crates/controller<br/>hilo dedicado + tokio"]
+    shared["crates/shared<br/>config · eventos · texto · rutas"]
+    llm["crates/llm_engine<br/>llama-server + modo externo"]
+    stt["crates/stt<br/>whisper-cli"]
+    tts["crates/tts<br/>Kokoro ONNX"]
+    audio["crates/audio_engine<br/>cpal + VAD + playback"]
+    scene["crates/scene3d<br/>stub · futuro"]
+
+    main --> ui
+    main --> controller
+    main --> shared
+    ui --> shared
+    controller --> shared
+    controller --> llm
+    controller --> stt
+    controller --> tts
+    controller --> audio
+    scene -.-> shared
+```
+
+| Crate | Responsabilidad | Estado |
+| --- | --- | --- |
+| `shared` | Contrato UI ⇄ motores, configuración TOML, texto y resolución de rutas | ✅ |
+| `controller` | Hilo controlador, procesos, HTTP/SSE, diagnóstico, CPU/RAM/VRAM y biblioteca GGUF | ✅ |
+| `llm_engine` | `llama-server` gestionado, health-check, modo externo OpenAI | ✅ |
+| `stt` | Wrapper de `whisper-cli` con WAV 16 kHz y parser tolerante | ✅ |
+| `tts` | Sintetizador Kokoro (worker Python) y comando externo | ✅ |
+| `audio_engine` | Captura `cpal`, VAD WebRTC, endpointing y playback | ✅ |
+| `ui` | Vistas GPUI componentizadas y Ajustes por motor | ✅ |
+| `scene3d` | Motor 3D futuro, con su contrato documentado | 💤 stub |
+
+La UI nunca arranca un motor: solo envía comandos y pinta eventos.
+
+```text
+UI (GPUI) ──EngineCommand──► controller ──► llama.cpp · whisper.cpp · Kokoro · cpal
+UI (GPUI) ◄──EngineEvent──── controller ◄── tokens · estado · recursos · errores
+```
+
+El controlador vive en su propio hilo con un runtime `tokio`; la UI sondea los eventos cada 50 ms. No se comparten locks entre la interfaz y los motores. Y no es una convención: `test/tests/boundary.rs` falla si el core importa GPUI.
+
+---
+
+## 🧰 Stack
+
+| Capa | Tecnología | Backend |
+| --- | --- | --- |
+| Lenguaje | Rust 2024 · `unsafe_code = "forbid"` | — |
+| Interfaz | GPUI Kit 0.9 | GPU del sistema |
+| LLM | llama.cpp (`llama-server`) | **Vulkan** |
+| STT | whisper.cpp (`whisper-cli`) | **Vulkan** |
+| TTS | Kokoro 82M ONNX | **CPU** (ONNX Runtime) |
+| Audio | `cpal` + `webrtc-vad` | CPU |
+| Configuración | `figment` + TOML | — |
+| Concurrencia | `tokio` + canales `crossbeam` | — |
+
+El TTS corre a propósito en CPU: con 8 GB de VRAM, Kokoro no debe competir con el LLM ni con Whisper.
+
+---
+
+## 📊 Estado del proyecto
+
+**Disponible hoy**
+
+- ✅ Workspace modular de 8 crates y binario GPUI mínimo.
+- ✅ Configuración segmentada y persistente (`config.toml`, `LOCALFORGE_*`, migración desde VoxLocal).
+- ✅ Gestión de `llama-server`: encender, apagar, reiniciar, health-check y streaming.
+- ✅ Modo externo para Ollama, LM Studio o un servidor ya arrancado.
+- ✅ Biblioteca de GGUF con alias y detección de shards.
+- ✅ STT con `whisper-cli`, TTS con Kokoro y audio con captura/VAD/playback.
+- ✅ Monitor de CPU, RAM, VRAM y memoria de la app en el pie.
+- ✅ Temas, color de acento, radio y tipografía ajustables en vivo.
+
+**En camino**
+
+- 🚧 Conversación manos libres con barge-in y TTS por frases.
+- 🚧 Historial persistente, métricas de tokens/s y cancelación real del HTTP en curso.
+- 🚧 Empaquetado e instaladores (`.deb`/AppImage, ZIP, `.dmg`).
+- 💤 Motor 3D (`scene3d`), todavía sin backend.
+
+Consulta el detalle y los criterios de aceptación en **[docs/ROADMAP.md](docs/ROADMAP.md)**.
+
+---
+
+## ⚡ Inicio rápido
+
+> **Requisitos:** Rust 1.85+ (edición 2024), un driver Vulkan funcional y espacio en disco para tus modelos. LocalForge no descarga modelos automáticamente.
 
 ### 1. Dependencias del sistema
 
@@ -83,13 +187,13 @@ sudo apt install -y build-essential clang cmake libasound2-dev libfontconfig-dev
   libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libvulkan1 mesa-vulkan-drivers
 ```
 
-Comprueba la GPU:
+Comprueba que Vulkan ve tu GPU:
 
 ```bash
 vulkaninfo --summary | grep -E 'deviceName|driverName'
 ```
 
-### 2. Compilar llama.cpp y whisper.cpp con Vulkan
+### 2. Compila los motores con Vulkan
 
 ```bash
 # llama.cpp
@@ -103,103 +207,127 @@ cmake -S whisper.cpp -B whisper.cpp/build -DGGML_VULKAN=1 -DCMAKE_BUILD_TYPE=Rel
 cmake --build whisper.cpp/build -j --target whisper-cli
 ```
 
-Verifica que llama.cpp ve la GPU:
+Verifica que `llama.cpp` enumera el dispositivo:
 
 ```bash
 llama-server --list-devices
 # Vulkan0: AMD Radeon RX 5700 XT (RADV NAVI10) (8176 MiB, ...)
 ```
 
-### 3. Modelos
+### 3. Descarga los modelos
 
 ```bash
 mkdir -p assets/models/{llm,whisper,kokoro}
 
-# LLM: un modelo pequeño/mediano en Q4_K_M para 8 GB de VRAM
-# (Qwen3-4B/8B, Llama-3.2-3B, Gemma-3-4B...)
-# Whisper: base o small para español
+# LLM: Qwen3-4B en Q4_K_M es el punto dulce para 8 GB de VRAM
+huggingface-cli download Qwen/Qwen3-4B-Instruct-2507-GGUF \
+  --include '*Q4_K_M.gguf' --local-dir assets/models/llm
+
+# STT: whisper small para español
 curl -L -o assets/models/whisper/ggml-small.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
 ```
 
-### 4. Kokoro (TTS)
+| Motor | Modelo sugerido | Tamaño |
+| --- | --- | --- |
+| LLM | Qwen3-4B-Instruct · Q4_K_M | ~2,5 GB |
+| STT | `ggml-small.bin` | 466 MB |
+| TTS | `kokoro-v1.0.int8.onnx` + `voices-v1.0.bin` | ~115 MB |
+
+Más opciones y enlaces en **[docs/MODELS.md](docs/MODELS.md)**.
+
+### 4. Prepara Kokoro (TTS)
 
 ```bash
 ./tools/setup_kokoro.sh
 ```
 
-Crea `.venv-kokoro/` con `kokoro-onnx` (ONNX Runtime CPU, sin PyTorch) y descarga
-`kokoro-v1.0.int8.onnx` + `voices-v1.0.bin` en `assets/models/kokoro/`. Después
-configura en **Ajustes → Motor Audio**: Python (`.venv-kokoro/bin/python`),
-worker (`tools/kokoro_worker.py`), carpeta del modelo y voz (`ef_dora`).
+Crea `.venv-kokoro/` con `kokoro-onnx` y ONNX Runtime **sin PyTorch**, y descarga los modelos en `assets/models/kokoro/`.
 
-### 5. Ejecutar
+### 5. Ejecuta
 
 ```bash
-cargo run
+cargo run --release
 ```
 
-La primera vez abre **Motor LLM** para indicar el binario, el GGUF o el endpoint
-externo. La configuración se guarda en:
+La primera vez, la app abre **Motor LLM** para indicar el binario, el GGUF o el endpoint externo. Después, configura el audio en **Ajustes → Motor Audio** y prueba una conversación.
 
-- Linux: `~/.config/localforge/config.toml`
-- Windows: `%APPDATA%\localforge\config.toml`
-- macOS: `~/Library/Application Support/localforge/config.toml`
+> En Windows y macOS también funciona (Vulkan incluido en el driver AMD; MoltenVK en macOS). Los detalles por plataforma están en **[docs/HARDWARE-VULKAN.md](docs/HARDWARE-VULKAN.md)**.
 
-Si vienes de VoxLocal, se migra una vez desde `voxlocal/config.toml`; el archivo
-antiguo no se borra.
+---
 
-## Documentación
+## ⚙️ Configuración
+
+La configuración se guarda en TOML y se puede sobreescribir con variables de entorno:
+
+| Plataforma | Ruta |
+| --- | --- |
+| Linux | `~/.config/localforge/config.toml` |
+| Windows | `%APPDATA%\localforge\config.toml` |
+| macOS | `~/Library/Application Support/localforge/config.toml` |
+
+```bash
+# Doble guion bajo para anidar secciones; el prefijo antiguo VOXLOCAL_* sigue funcionando
+LOCALFORGE_LLM__PORT=9931 cargo run --release
+```
+
+Los datos y logs viven en `dirs::data_dir()/localforge/`. Las claves nuevas tienen valores por defecto, así que un TOML parcial o antiguo nunca rompe el arranque.
+
+---
+
+## 🚀 Rendimiento en 8 GB de VRAM
+
+- **4B Q4_K_M + contexto 4k–8k** es el punto dulce. Un **8B Q4_K_M** pide bajar a contexto 2k o usar Q3/IQ3.
+- `-ngl 99` intenta todo; si el driver no cabe, prueba `-ngl 24–32` en un 8B.
+- Whisper compite por VRAM cuando transcribe: usa `ggml-small` como máximo.
+- La VRAM no es RAM. Un 8B con contexto 32k puede hacer swap y arrastrar todo el sistema.
+- Compila siempre en `--release`: el perfil incluye `lto = "thin"`, `codegen-units = 1` y `strip`.
+
+---
+
+## 🧪 Calidad
+
+```bash
+cargo fmt --all
+cargo clippy --all-targets --all-features -- -D warnings
+cd test && cargo test
+```
+
+La suite vive en `test/`, un crate propio fuera del workspace. No necesita GPU, micrófono, modelos ni red externa, e incluye pruebas de frontera que impiden que GPUI se filtre al core. Lo que requiere hardware real se documenta como checklist manual en `test/docs/hardware.md`.
+
+También hay pruebas de humo para el pipeline de audio (`test/src/bin/tone.rs` y `capture.rs`).
+
+---
+
+## 📚 Documentación
 
 | Documento | Contenido |
 | --- | --- |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Crates, flujo de datos, hilos, contratos y ADRs |
+| [docs/HARDWARE-VULKAN.md](docs/HARDWARE-VULKAN.md) | RDNA 1, presupuesto de VRAM, builds y diagnóstico |
+| [docs/MODELS.md](docs/MODELS.md) | Modelos recomendados y descargas verificadas |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Hitos y criterios de aceptación |
-| [docs/HARDWARE-VULKAN.md](docs/HARDWARE-VULKAN.md) | RDNA 1, presupuestos de VRAM, builds y diagnóstico |
-| [docs/MODELS.md](docs/MODELS.md) | Modelos recomendados y descargas |
-| [AGENTS.md](AGENTS.md) | Contexto del proyecto y reglas para agentes |
+| [AGENTS.md](AGENTS.md) | Contexto y reglas para agentes que trabajen en el repo |
 
-## Pruebas
+---
 
-La suite vive en `test/`, es un crate propio **fuera del workspace** y está
-ignorada por git: el repositorio solo versiona el código de la app.
+## 🤝 Contribuir
 
-```bash
-cd test && cargo test        # 64 tests: shared, llm_engine, system, audio, ui, controller, boundary
-```
+Las ideas, los issues y los PRs son bienvenidos. Antes de un cambio grande, abre un issue para acordar el enfoque. Para que un PR entre:
 
-No necesita GPU, micrófono ni modelos. El detalle (cobertura, fixtures y
-checklist manual en la máquina objetivo) está en `test/README.md`,
-`test/docs/plan.md` y `test/docs/hardware.md`, que por diseño no se versionan.
+1. `cargo fmt --all` y `cargo clippy --all-targets --all-features -- -D warnings` en verde.
+2. `cd test && cargo test` en verde.
+3. Nada de CUDA, ROCm, PyTorch ni `unsafe`.
+4. Si añades un motor, respeta el contrato `EngineCommand` / `EngineEvent`.
 
-## Skills para agentes
+---
 
-Las skills locales viven en `.agents/skills/` y son la guía operativa del proyecto:
+## 📄 Licencia
 
-- `localforge-architecture` — límites entre crates y contratos
-- `vulkan-ai-stack` — llama.cpp/whisper.cpp en Vulkan, RDNA 1 y VRAM
-- `gpui-kit-desktop` — GPUI Kit 0.9: Entity, Settings, tareas y tests
-- `voice-pipeline` — VAD, STT, LLM, TTS y latencia
-- `process-supervision` — procesos hijos, health-checks y limpieza
-- `localforge-workflow` — build, modelos, verificación y releases
-- `rust-best-practices` — borrowing, clippy, errores, tests y type-state
+Distribuido bajo **MIT OR Apache-2.0**, la convención de la comunidad Rust: puedes usar el proyecto bajo los términos de cualquiera de las dos licencias.
 
-## Licencia
+<br />
 
-MIT OR Apache-2.0
-
-## Rendimiento
-
-- Para uso real compila en release: `cargo run --release`. El perfil incluye
-  `lto = "thin"`, `codegen-units = 1` y `strip`; el build de debug es mucho más
-  lento y no representa el rendimiento final.
-- La app ronda los **200 MB**. El footer muestra `LLM X MB`: esa es la memoria
-  del proceso `llama-server`.
-- Ver 13 GB de RAM usada con un 8B Q4 no es la UI: es el modelo + KV cache. En
-  8 GB de VRAM, un 8B con `-ngl 99` y `ctx 32768` hace swap y arrastra todo el
-  sistema. Usa `ctx 4096–8192` y `-ngl 24–32`, o un 4B Q4_K_M.
-- El escaneo de modelos corre en `spawn_blocking`, el muestreo de recursos en su
-  propia tarea y la captura de audio en un hilo con callback sin locks: nada de
-  eso bloquea el hilo de GPUI.
-- La biblioteca de modelos busca por defecto en `~/.cache/huggingface/hub`
-  cuando no hay carpeta configurada, recorriendo `models--*/snapshots/*/`.
+<div align="center">
+  <sub>Hecho con 🦀 Rust, ⚡ Vulkan y la convicción de que tu hardware no está obsoleto.</sub>
+</div>

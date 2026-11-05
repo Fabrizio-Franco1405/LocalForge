@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="LocalForge logo">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b0a13"/>
+      <stop offset="1" stop-color="#150f2b"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8b6cff"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c3b2ff"/>
+      <stop offset="1" stop-color="#6446ff"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.45" r="0.55">
+      <stop offset="0" stop-color="#7c5cff" stop-opacity="0.38"/>
+      <stop offset="1" stop-color="#7c5cff" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
+      <path d="M28 0H0V28" fill="none" stroke="#ffffff" stroke-opacity="0.035" stroke-width="1"/>
+    </pattern>
+    <clipPath id="frame"><rect width="512" height="512" rx="112"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <rect width="512" height="512" fill="url(#bg)"/>
+    <rect width="512" height="512" fill="url(#grid)"/>
+    <circle cx="256" cy="240" r="250" fill="url(#glow)"/>
+
+    <g transform="translate(256 256)">
+      <circle r="168" fill="none" stroke="#22d3ee" stroke-opacity="0.12" stroke-dasharray="2 10"/>
+      <circle r="140" fill="none" stroke="#7c5cff" stroke-opacity="0.18"/>
+
+      <path d="M0 -118 L102.2 -59 L102.2 59 L0 118 L-102.2 59 L-102.2 -59 Z" fill="#7c5cff" fill-opacity="0.05" stroke="url(#brand)" stroke-width="3.4"/>
+
+      <path d="M0 -92 L79.7 -46 L79.7 46 L0 92 L-79.7 46 L-79.7 -46 Z" fill="none" stroke="#a78bfa" stroke-opacity="0.22" stroke-dasharray="4 9"/>
+
+      <!-- anvil -->
+      <g fill="url(#metal)" fill-opacity="0.94" stroke="#d6ccff" stroke-opacity="0.6" stroke-width="1.6" stroke-linejoin="round">
+        <path d="M-56 -37 H37 L64 -26 L37 -16 H-56 Z"/>
+        <path d="M-15 -16 H15 V20 H-15 Z"/>
+        <path d="M-31 20 H31 V36 H-31 Z"/>
+      </g>
+
+      <!-- circuit traces -->
+      <g stroke="#22d3ee" stroke-opacity="0.55" stroke-width="1.8" fill="none">
+        <path d="M-102.2 -59 H-128 V-18 H-148"/>
+        <path d="M102.2 59 H128 V18 H148"/>
+        <path d="M0 -118 V-142"/>
+      </g>
+      <g fill="#22d3ee">
+        <circle cx="-148" cy="-18" r="3.6"/>
+        <circle cx="148" cy="18" r="3.6"/>
+        <circle cx="0" cy="-142" r="3.6"/>
+      </g>
+
+      <!-- sparks -->
+      <circle cx="-74" cy="-76" r="2.7" fill="#fbbf24" fill-opacity="0.95"/>
+      <circle cx="80" cy="-42" r="2.1" fill="#a78bfa" fill-opacity="0.95"/>
+      <circle cx="68" cy="80" r="2.5" fill="#22d3ee" fill-opacity="0.85"/>
+      <circle cx="-86" cy="56" r="1.9" fill="#7c5cff" fill-opacity="0.9"/>
+    </g>
+  </g>
+
+  <rect x="1.25" y="1.25" width="509.5" height="509.5" rx="110.75" fill="none" stroke="#2b2650" stroke-width="2.5"/>
+</svg>
