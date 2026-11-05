@@ -85,7 +85,7 @@ fn settings_view(cx: &mut App) -> impl IntoElement {
                         )
                         .item(
                             SettingItem::new(
-                                "Autoarranque",
+                                "Arrancar con la aplicación",
                                 SettingField::switch(
                                     |cx| cfg(cx).llm.auto_start,
                                     |value: bool, cx| update_config(cx, |c| c.llm.auto_start = value),

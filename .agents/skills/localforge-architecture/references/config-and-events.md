@@ -15,7 +15,7 @@ temperature = 0.7
 max_tokens = 512
 system_prompt = "Eres un asistente útil. Responde de forma breve y natural."
 extra_args = []
-auto_start = true
+auto_start = false             # solo se aplica al abrir la app
 startup_timeout_secs = 90
 
 [stt]

@@ -211,7 +211,7 @@ impl Default for LlmConfig {
                 "Eres un asistente de voz local. Responde de forma breve, clara y natural, sin Markdown."
                     .to_owned(),
             extra_args: Vec::new(),
-            auto_start: true,
+            auto_start: false,
             startup_timeout_secs: 90,
         }
     }

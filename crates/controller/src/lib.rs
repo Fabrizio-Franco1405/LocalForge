@@ -45,6 +45,12 @@ struct Controller {
     internal_tx: mpsc::UnboundedSender<Internal>,
     internal_rx: mpsc::UnboundedReceiver<Internal>,
     llm: Option<LlamaManager>,
+    /// User intent for the managed engine. Only explicit Start/Restart/Stop
+    /// commands and `auto_start` at boot change it; probes never do.
+    ///
+    /// This is what keeps a stopped engine stopped when the configuration is
+    /// reloaded or a message is sent.
+    llm_desired_running: bool,
     /// Last successful probe and its human-readable detail.
     probe: ServerProbe,
     state: LlmState,
@@ -93,6 +99,9 @@ impl Controller {
         events: Sender<EngineEvent>,
     ) -> Self {
         let (internal_tx, internal_rx) = mpsc::unbounded_channel();
+        // Only the launch configuration decides the initial intent. Applying
+        // settings later never starts an engine the user turned off.
+        let llm_desired_running = config.llm.auto_start;
 
         Self {
             config,
@@ -101,6 +110,7 @@ impl Controller {
             internal_tx,
             internal_rx,
             llm: None,
+            llm_desired_running,
             probe: ServerProbe::default(),
             state: LlmState::Stopped,
             detail: "Sin iniciar".to_owned(),
@@ -147,9 +157,10 @@ impl Controller {
             });
         }
 
-        // Always probe first: a server started by the user must be detected
-        // even when no GGUF model is configured in LocalForge.
-        self.refresh(self.config.llm.auto_start).await;
+        // Probe first: a server started by the user is detected even when no
+        // GGUF model is configured. The engine is only spawned when the launch
+        // configuration enables `auto_start`.
+        self.refresh(self.llm_desired_running).await;
 
         let mut ticker = tokio::time::interval(Duration::from_secs(3));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -363,8 +374,9 @@ impl Controller {
     /// Re-probes the configured endpoint and updates the lifecycle state.
     ///
     /// `force_start` controls whether a managed `llama-server` is spawned when
-    /// nothing is listening. Booting honours `auto_start`; Apply and Restart
-    /// force it so the buttons never look inert.
+    /// nothing is listening. It only comes from an explicit Start/Restart or
+    /// from `auto_start` at boot; reloading settings and sending messages never
+    /// turn a stopped engine back on.
     async fn refresh(&mut self, force_start: bool) {
         if !self.ensure_manager() {
             return;
@@ -391,7 +403,7 @@ impl Controller {
 
         if !force_start && !self.llm.as_ref().is_some_and(LlamaManager::is_running) {
             let hint = if self.config.llm.model.is_some() {
-                format!("{} · pulsa Aplicar o Reiniciar para arrancar", probe.detail)
+                format!("{} · pulsa Encender para arrancar", probe.detail)
             } else {
                 format!(
                     "{} · configura un .gguf o inicia llama-server con --port {}",
@@ -551,10 +563,7 @@ impl Controller {
         // 4. Si está apagado, actualizamos botón Y herramientas
         if self.state != LlmState::Error {
             let hint = if self.config.llm.is_managed() {
-                format!(
-                    "{} · inicia llama-server o pulsa Reiniciar motor",
-                    probe.detail
-                )
+                format!("{} · inicia llama-server o pulsa Encender", probe.detail)
             } else {
                 probe.detail.clone()
             };
@@ -626,17 +635,26 @@ impl Controller {
 
     async fn handle(&mut self, command: EngineCommand) -> bool {
         match command {
-            EngineCommand::StartLlm => self.refresh(true).await,
+            EngineCommand::StartLlm => {
+                self.llm_desired_running = true;
+                self.refresh(true).await;
+            }
             EngineCommand::StopLlm => {
+                self.llm_desired_running = false;
                 self.stop_child().await;
                 self.set_state(LlmState::Stopped, "Detenido por el usuario".to_owned());
             }
             EngineCommand::RestartLlm => {
+                self.llm_desired_running = true;
                 self.stop_child().await;
                 self.resolved_model.clear();
                 self.refresh(true).await;
             }
             EngineCommand::ReloadConfig(config) => {
+                // Applying settings preserves the current intent: a running
+                // engine is restarted with the new values, a stopped engine
+                // stays stopped. `auto_start` is a launch-only setting.
+                let was_running = self.llm_desired_running;
                 self.stop_child().await;
                 self.history.clear();
                 self.active.store(0, Ordering::Relaxed);
@@ -645,7 +663,7 @@ impl Controller {
                 self.llm = None;
                 self.wait_local_port_free().await;
                 self.scan_models().await;
-                self.refresh(true).await;
+                self.refresh(was_running).await;
             }
             EngineCommand::ProbeLlm => {
                 self.probe_now().await;
@@ -697,15 +715,17 @@ impl Controller {
 
     async fn send_message(&mut self, generation: u64, prompt: String) {
         // If the status is stale (server just started), probe before failing.
+        // Never start the engine here: the user may have stopped it on purpose.
         if self.state != LlmState::Ready {
-            self.refresh(self.config.llm.is_managed()).await;
+            self.refresh(false).await;
         }
 
         if self.state != LlmState::Ready {
             self.emit_error(
                 "llm",
                 format!(
-                    "El motor no está listo: {}. Revisa Ajustes → Motor LLM.",
+                    "El motor está apagado o no responde: {}. Pulsa Encender en el \
+                     encabezado o revisa Ajustes → Motor LLM.",
                     self.detail
                 ),
             );

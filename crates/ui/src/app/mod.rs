@@ -140,6 +140,7 @@ pub struct VoxApp {
     draft: Entity<InputState>,
     _draft_sub: Subscription,
     _config_sub: Subscription,
+    _quit_sub: Subscription,
     _pump: Task<()>,
     llm: LlmState,
     llm_detail: String,
@@ -193,6 +194,17 @@ impl VoxApp {
             cx.notify();
         });
 
+        // Ask the controller to kill managed children before the process
+        // exits. Without this, a `llama-server` can outlive the window, keep
+        // holding VRAM and be re-adopted on the next launch.
+        let quit_engine = engine.clone();
+        let _quit_sub = cx.on_app_quit(move |_, _| {
+            let engine = quit_engine.clone();
+            async move {
+                engine.send(EngineCommand::Shutdown);
+            }
+        });
+
         let _pump = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()
@@ -212,6 +224,7 @@ impl VoxApp {
             draft,
             _draft_sub,
             _config_sub,
+            _quit_sub,
             _pump,
             llm: LlmState::Stopped,
             llm_detail: "Sin iniciar".to_owned(),

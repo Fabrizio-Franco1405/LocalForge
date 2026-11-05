@@ -40,7 +40,9 @@ pub enum EngineCommand {
     StopLlm,
     /// Stop and start again with the current configuration.
     RestartLlm,
-    /// Replace the configuration; restarts the engine when needed.
+    /// Replace the configuration. A running engine is restarted with the new
+    /// values; a stopped engine stays stopped (`auto_start` only applies at
+    /// application launch).
     ReloadConfig(Box<VoxConfig>),
     /// Send a user prompt and stream the assistant reply.
     SendMessage {

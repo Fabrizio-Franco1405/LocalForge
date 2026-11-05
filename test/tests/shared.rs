@@ -28,6 +28,14 @@ mod config {
     }
 
     #[test]
+    fn engines_start_off_by_default() {
+        let cfg = VoxConfig::default();
+
+        // Auto-start is opt-in and only applies at application launch.
+        assert!(!cfg.llm.auto_start);
+    }
+
+    #[test]
     fn wildcard_host_maps_to_loopback_for_clients() {
         let cfg = LlmConfig {
             host: "0.0.0.0".to_owned(),

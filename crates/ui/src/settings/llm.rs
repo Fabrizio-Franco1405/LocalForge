@@ -186,13 +186,19 @@ fn managed_group() -> SettingGroup {
                 |cfg, value| cfg.llm.threads = value as u16,
             ),
         ))
-        .item(SettingItem::new(
-            "Autoarranque",
-            bool_field(
-                |cfg| cfg.llm.auto_start,
-                |cfg, value| cfg.llm.auto_start = value,
+        .item(
+            SettingItem::new(
+                "Arrancar con la aplicación",
+                bool_field(
+                    |cfg| cfg.llm.auto_start,
+                    |cfg, value| cfg.llm.auto_start = value,
+                ),
+            )
+            .description(
+                "Solo se aplica al abrir LocalForge. Desactivado, el motor empieza apagado \
+                 y no se reinicia al aplicar ajustes ni al enviar mensajes.",
             ),
-        ))
+        )
         .item(SettingItem::new(
             "Timeout de arranque (s)",
             number_field(

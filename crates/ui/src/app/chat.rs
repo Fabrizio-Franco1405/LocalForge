@@ -627,10 +627,15 @@ impl VoxApp {
         });
 
         let cfg = config::current(cx);
+        let running = matches!(self.llm, LlmState::Ready | LlmState::Starting);
         self.engine.send(EngineCommand::ReloadConfig(Box::new(cfg)));
         cx.global_mut::<config::GlobalConfig>().mark_applied();
         self.model_menu = false;
-        self.notice = Some("Modelo cambiado: reiniciando el motor…".to_owned());
+        self.notice = Some(if running {
+            "Modelo cambiado: reiniciando el motor…".to_owned()
+        } else {
+            "Modelo seleccionado. El motor sigue apagado; pulsa Encender para usarlo.".to_owned()
+        });
         cx.notify();
     }
 

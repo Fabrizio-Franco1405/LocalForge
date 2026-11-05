@@ -7,6 +7,7 @@ description = "Harness local para conectar LLM, voz y 3D sin salir de tu máquin
 
 [dependencies]
 gpui-kit = { workspace = true }
+rust-embed = "8"
 shared = { workspace = true }
 ui = { workspace = true }
 controller = { workspace = true }
